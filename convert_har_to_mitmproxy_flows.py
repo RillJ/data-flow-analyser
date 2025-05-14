@@ -1,4 +1,5 @@
 import json
+import os
 from mitmproxy import http, connection
 from mitmproxy.io import FlowWriter
 
@@ -15,7 +16,7 @@ def har_to_flows(har_path: str, flows_path: str) -> None:
 
     entries = har.get('log', {}).get('entries', [])
     if not entries:
-        print("No entries found in HAR file.")
+        print(f"No entries found in HAR file: {har_path}")
         return
 
     # Open the output .flows file
@@ -60,15 +61,33 @@ def har_to_flows(har_path: str, flows_path: str) -> None:
 
     print(f"Converted {len(entries)} entries from '{har_path}' to '{flows_path}'.")
 
+def convert_folder(input_dir: str, output_dir: str) -> None:
+    """
+    Convert all .har files in a folder to .flows files in the output directory.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    for filename in os.listdir(input_dir):
+        if filename.lower().endswith(".har"):
+            input_path = os.path.join(input_dir, filename)
+            output_filename = os.path.splitext(filename)[0] + ".flows"
+            output_path = os.path.join(output_dir, output_filename)
+            har_to_flows(input_path, output_path)
 
 if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='Convert a HAR file to mitmproxy .flows format.'
+        description='Convert HAR file(s) to mitmproxy .flows format.'
     )
-    parser.add_argument('har', help='Input HAR file path')
-    parser.add_argument('flows', help='Output .flows file path')
+    parser.add_argument('--har', help='Input HAR file path')
+    parser.add_argument('--flows', help='Output .flows file path')
+    parser.add_argument('--input-dir', help='Input folder containing HAR files')
+    parser.add_argument('--output-dir', help='Output folder for .flows files')
     args = parser.parse_args()
 
-    har_to_flows(args.har, args.flows)
+    if args.input_dir and args.output_dir:
+        convert_folder(args.input_dir, args.output_dir)
+    elif args.har and args.flows:
+        har_to_flows(args.har, args.flows)
+    else:
+        print("Please specify either --har and --flows, or --input-dir and --output-dir")
