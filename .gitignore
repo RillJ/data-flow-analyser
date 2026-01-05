@@ -172,3 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# MaxMind databases
+GeoLite2-City.mmdb
+GeoLite2-Country.mmdb
