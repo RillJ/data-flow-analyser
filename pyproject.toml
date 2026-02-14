@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-flow-analyser"
+version = "0.1.0"
+description = "AI-Powered Network Traffic Analysis for Privacy Risk Detection."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "typer",
+    "rich",
+    "pytest",
+]
+
+[project.scripts]
+data-flow-analyser = "data_flow_analyser.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/data_flow_analyser"]

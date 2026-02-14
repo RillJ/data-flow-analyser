@@ -1,0 +1,3 @@
+import data_flow_analyser
+
+print(data_flow_analyser.__version__)
