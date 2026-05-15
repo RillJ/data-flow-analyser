@@ -13,6 +13,8 @@ dependencies = [
     "typer",
     "rich",
     "pytest",
+    "mitmproxy",
+    "dotenv"
 ]
 
 [project.scripts]
