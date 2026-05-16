@@ -1,0 +1,86 @@
+import base64
+import hashlib
+from typing import Any, Dict, List, Tuple
+
+from data_flow_analyser.models.schemas import SeedData
+
+
+def generate_seed_hash_map(raw_seeds: Dict[str, str]) -> SeedData:
+    """
+    Pre-computes MD5, SHA-1, SHA-256, and Base64 variants for raw seed values.
+
+    Args:
+        raw_seeds: Dictionary mapping labels to raw seed strings (example: {"email": "test@surf.nl"})
+
+    Returns:
+        SeedData model containing raw values and the generated lookup map.
+    """
+    hash_map: Dict[str, str] = {}
+
+    for label, raw_val in raw_seeds.items():
+        if not raw_val or not isinstance(raw_val, str):
+            continue
+
+        trimmed = raw_val.strip()
+        variations = {
+            trimmed,
+            trimmed.lower(),
+            trimmed.upper(),
+        }
+
+        for val in variations:
+            val_bytes = val.encode("utf-8")
+
+            # Direct plaintext match
+            hash_map[val] = label
+
+            # MD5
+            md5_hex = hashlib.md5(val_bytes).hexdigest()
+            hash_map[md5_hex] = f"{label} (MD5)"
+            hash_map[md5_hex.upper()] = f"{label} (MD5 Upper)"
+
+            # SHA-1
+            sha1_hex = hashlib.sha1(val_bytes).hexdigest()
+            hash_map[sha1_hex] = f"{label} (SHA-1)"
+            hash_map[sha1_hex.upper()] = f"{label} (SHA-1 Upper)"
+
+            # SHA-256
+            sha256_hex = hashlib.sha256(val_bytes).hexdigest()
+            hash_map[sha256_hex] = f"{label} (SHA-256)"
+            hash_map[sha256_hex.upper()] = f"{label} (SHA-256 Upper)"
+
+            # Base64
+            b64_str = base64.b64encode(val_bytes).decode("utf-8")
+            hash_map[b64_str] = f"{label} (Base64)"
+
+    return SeedData(raw_values=raw_seeds, hash_map=hash_map)
+
+
+def scan_for_seed_matches(payload: Any, seed_data: SeedData) -> List[Tuple[str, str]]:
+    """
+    Recursively scans a string, dictionary, or list payload for occurrences of
+    pre-computed seed hashes or plaintexts.
+
+    Args:
+        payload: Decoded payload (dict, list, str, etc.)
+        seed_data: Pre-computed SeedData object containing hash_map.
+
+    Returns:
+        List of tuples: (matched_token_or_hash, seed_label)
+    """
+    matches: List[Tuple[str, str]] = []
+
+    if isinstance(payload, dict):
+        for k, v in payload.items():
+            matches.extend(scan_for_seed_matches(k, seed_data))
+            matches.extend(scan_for_seed_matches(v, seed_data))
+    elif isinstance(payload, list):
+        for item in payload:
+            matches.extend(scan_for_seed_matches(item, seed_data))
+    elif isinstance(payload, str) and payload.strip():
+        # Check against hash_map
+        for token, label in seed_data.hash_map.items():
+            if len(token) >= 4 and token in payload:
+                matches.append((token, label))
+
+    return matches
