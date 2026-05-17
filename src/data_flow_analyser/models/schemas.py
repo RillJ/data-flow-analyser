@@ -32,12 +32,15 @@ class SeedData(BaseModel):
 
 
 class ObservedEndpoint(BaseModel):
-    """A network destination observed during the assessment."""
-
+    """A network destination with entity profiling and geolocation."""
     domain: str
     ip_address: Optional[str] = None
-    parent_entity: Optional[str] = None
-    category: Literal["internal", "subprocessor", "third_party", "unknown"]
+    reverse_dns: Optional[str] = None
+    parent_entity: Optional[str] = None   # like: "Google LLC"
+    category: str = "unknown"             # like: "internal", "subprocessor", "third_party_tracker", "unknown"
+    country_code: Optional[str] = None    # like: "US", "NL", "DE"
+    asn_org: Optional[str] = None         # like: "Amazon.com, Inc.", "Cloudflare, Inc."
+    is_third_country_transfer: bool = False  # Flagged if traffic leaves origin country
     is_undocumented: bool = False
 
 
@@ -52,7 +55,7 @@ class PolicyStatement(BaseModel):
 
 
 class RiskComponents(BaseModel):
-    """Individual normalised factors contributing to a network flow risk score."""
+    """Individual normalied factors contributing to a network flow risk score."""
 
     data_sensitivity_score: float = Field(ge=0.0, le=10.0, description="S(D_pii)")
     subprocessor_status_score: float = Field(ge=0.0, le=10.0, description="P(E_sub)")

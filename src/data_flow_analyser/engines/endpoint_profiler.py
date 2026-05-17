@@ -1,0 +1,241 @@
+import ipaddress
+import json
+from pathlib import Path
+import socket
+from typing import Any, Dict, Optional, Tuple
+import urllib.error
+import urllib.request
+
+from data_flow_analyser.models.schemas import ObservedEndpoint
+
+# List of EU/EEA country codes for third-country transfer checks. Source: https://www.netherlandsworldwide.nl/eu-eea-efta-schengen-countries
+EU_EEA_COUNTRIES = {
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+    "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+    "PL", "PT", "RO", "SK", "SI", "ES", "SE", "NO", "IS", "LI"
+}
+
+
+class DDGTrackerRadar:
+    """
+    Interface for querying DuckDuckGo Tracker Radar domain data and entity mappings.
+    Supports suffix matching and live fetching from GitHub.
+    """
+
+    GITHUB_RAW_BASE = "https://raw.githubusercontent.com/duckduckgo/tracker-radar/main"
+
+    def __init__(self, radar_data: Optional[Dict[str, Any]] = None):
+        # Maps domain name -> domain metadata dict
+        self.radar_data: Dict[str, Any] = radar_data or {}
+
+    @classmethod
+    def load_from_directory(cls, dir_path: str) -> "DDGTrackerRadar":
+        """
+        Loads Tracker Radar domain JSON files from a local directory (e.g. cloned tracker-radar repo).
+        """
+        radar_map: Dict[str, Any] = {}
+        target_dir = Path(dir_path)
+
+        if not target_dir.exists():
+            raise FileNotFoundError(f"Directory not found: {dir_path}")
+
+        for json_file in target_dir.rglob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    domain = data.get("domain") or json_file.stem
+                    radar_map[domain.lower()] = data
+            except (json.JSONDecodeError, OSError):
+                continue
+
+        return cls(radar_data=radar_map)
+
+
+    def fetch_and_cache_domain(self, domain: str, region: str = "US") -> Optional[Dict[str, Any]]:
+        """
+        Dynamically fetches tracker metadata for a single domain from GitHub raw assets.
+        Caches result in self.radar_data.
+        """
+        domain_clean = domain.lower().strip()
+        if domain_clean in self.radar_data:
+            return self.radar_data[domain_clean]
+
+        url = f"{self.GITHUB_RAW_BASE}/domains/{region}/{domain_clean}.json"
+        
+        try:
+            req = urllib.request.Request(
+                url, 
+                headers={"User-Agent": "DataFlowAnalyser/1.0 (Academic Research)"}
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    self.radar_data[domain_clean] = data
+                    return data
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+            pass
+
+        return None
+
+
+    def get_tracker_metadata(self, domain: str, auto_fetch: bool = True) -> Optional[Dict[str, Any]]:
+        """
+        Returns DDG Tracker Radar metadata for an exact domain string.
+        """
+        domain_clean = domain.lower().strip()
+
+        if domain_clean in self.radar_data:
+            return self.radar_data[domain_clean]
+
+        if auto_fetch:
+            return self.fetch_and_cache_domain(domain_clean)
+
+        return None
+
+
+    def lookup_domain(self, domain: str, auto_fetch: bool = True) -> Tuple[Optional[str], str]:
+        """
+        Performs domain & suffix lookup (e.g. 'sub.ad.doubleclick.net' -> 'doubleclick.net').
+        
+        Returns:
+            Tuple of (parent_entity_name, category)
+        """
+        clean_domain = domain.lower().strip()
+        parts = clean_domain.split(".")
+
+        # Walk down domain hierarchy: sub.ad.doubleclick.net > ad.doubleclick.net -> doubleclick.net
+        for i in range(len(parts) - 1):
+            sub_domain = ".".join(parts[i:])
+            
+            meta = self.get_tracker_metadata(sub_domain, auto_fetch=auto_fetch)
+            if meta:
+                # Extract parent entity (handles DDG schema 'owner.name' or dictionary 'entity')
+                entity: Optional[str] = None
+                if isinstance(meta.get("owner"), dict):
+                    entity = meta["owner"].get("name")
+                if not entity and isinstance(meta.get("entity"), str):
+                    entity = meta["entity"]
+
+                # Extract category guaranteed to be a str
+                category: str = "third_party_tracker"
+                categories = meta.get("categories")
+                if isinstance(categories, list) and len(categories) > 0 and isinstance(categories[0], str):
+                    category = categories[0]
+                elif isinstance(meta.get("category"), str):
+                    category = meta["category"]
+
+                return entity, category
+
+        return None, "unknown"
+
+
+    def is_known_tracker(self, domain: str, auto_fetch: bool = True) -> bool:
+        """Checks if a domain or its parent root is registered as a tracker."""
+        entity, _ = self.lookup_domain(domain, auto_fetch=auto_fetch)
+        return entity is not None
+
+
+class EndpointProfiler:
+    """Enriches IP addresses and domains with Reverse DNS, GeoIP, ASN, and Tracker Metadata."""
+
+    def __init__(self, tracker_radar: Optional[DDGTrackerRadar] = None):
+        self.tracker_radar = tracker_radar or DDGTrackerRadar()
+        self._dns_cache: Dict[str, Optional[str]] = {}
+        self._geoip_cache: Dict[str, Dict[str, Any]] = {}
+
+
+    def resolve_reverse_dns(self, ip_address: str) -> Optional[str]:
+        """Performs PTR record lookup for an IP address with caching."""
+        if ip_address in self._dns_cache:
+            return self._dns_cache[ip_address]
+
+        try:
+            ip_obj = ipaddress.ip_address(ip_address)
+            if ip_obj.is_private or ip_obj.is_loopback:
+                res = "localhost" if ip_obj.is_loopback else "local_network"
+                self._dns_cache[ip_address] = res
+                return res
+
+            hostname, _, _ = socket.gethostbyaddr(ip_address)
+            self._dns_cache[ip_address] = hostname
+            return hostname
+        except Exception:
+            self._dns_cache[ip_address] = None
+            return None
+
+
+    def lookup_ip_geolocation(self, ip_address: str) -> Dict[str, Any]:
+        """Looks up country code and ASN organization for an IP address."""
+        if ip_address in self._geoip_cache:
+            return self._geoip_cache[ip_address]
+
+        default_result = {"country_code": None, "asn_org": None, "is_private": False}
+
+        try:
+            ip_obj = ipaddress.ip_address(ip_address)
+            if ip_obj.is_private or ip_obj.is_loopback:
+                default_result.update({"country_code": "LOCAL", "asn_org": "Private Network", "is_private": True})
+                self._geoip_cache[ip_address] = default_result
+                return default_result
+
+            url = f"http://ip-api.com/json/{ip_address}?fields=status,countryCode,org,as"
+            req = urllib.request.Request(url, headers={"User-Agent": "data-flow-analyser/1.0"})
+            
+            with urllib.request.urlopen(req, timeout=2.0) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode("utf-8"))
+                    if data.get("status") == "success":
+                        res = {
+                            "country_code": data.get("countryCode"),
+                            "asn_org": data.get("org") or data.get("as"),
+                            "is_private": False
+                        }
+                        self._geoip_cache[ip_address] = res
+                        return res
+        except Exception:
+            pass
+
+        self._geoip_cache[ip_address] = default_result
+        return default_result
+
+
+    def profile_endpoint(
+        self,
+        domain: str,
+        ip_address: Optional[str] = None,
+        base_location: str = "NL",
+        auto_fetch_tracker: bool = True
+    ) -> ObservedEndpoint:
+        """
+        Combines Tracker Radar, Reverse DNS, and GeoIP lookups to build an ObservedEndpoint.
+        """
+        parent_entity, category = self.tracker_radar.lookup_domain(
+            domain, 
+            auto_fetch=auto_fetch_tracker
+        )
+        reverse_dns = None
+        country_code = None
+        asn_org = None
+
+        if ip_address:
+            reverse_dns = self.resolve_reverse_dns(ip_address)
+            geo_info = self.lookup_ip_geolocation(ip_address)
+            country_code = geo_info.get("country_code")
+            asn_org = geo_info.get("asn_org")
+
+        is_third_country = False
+        if country_code and country_code not in ("LOCAL", None):
+            if base_location in EU_EEA_COUNTRIES and country_code not in EU_EEA_COUNTRIES:
+                is_third_country = True
+
+        return ObservedEndpoint(
+            domain=domain,
+            ip_address=ip_address,
+            reverse_dns=reverse_dns,
+            parent_entity=parent_entity,
+            category=category,
+            country_code=country_code,
+            asn_org=asn_org,
+            is_third_country_transfer=is_third_country,
+            is_undocumented=False,
+        )
