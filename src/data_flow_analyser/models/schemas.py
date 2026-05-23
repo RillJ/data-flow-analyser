@@ -75,3 +75,26 @@ class PrivacyDiscrepancy(BaseModel):
         description="Calculated R_flow score.",
     )
     components: RiskComponents
+
+class TrackingToken(BaseModel):
+    """Represents a high-entropy string candidate flagged as a dynamic identifier."""
+    token: str
+    location: str  # example: "cookies_sent.session_id", "request_body.meta.visitor_id"
+    entropy: float
+    is_high_entropy: bool = True
+
+
+class CookieLongevityResult(BaseModel):
+    """Represents cookie lifespan analysis from Set-Cookie headers."""
+    cookie_name: str
+    cookie_value: str
+    max_age_seconds: Optional[int] = None
+    expires_at: Optional[datetime] = None
+    lifespan_days: Optional[float] = None
+    is_excessive_longevity: bool = False  # True if > 90 days.
+    # While EU regulations do not prescribe a universal numeric cap on cookie lifespans,
+    # GDPR Art. 5(1)(e) mandates storage limitation proportional to purpose.
+    # National DPAs (like from CNIL, Irish DPC) recommend maximum cookie retention windows
+    # ranging from 6 to 13 months. My scanner applies a conservative heuristic threshold
+    # of 90 days (7,776,000 seconds) to flag non-essential tracking cookies
+    # with excessive persistence relative to temporary session/campaign tracking.
