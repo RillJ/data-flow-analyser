@@ -14,7 +14,8 @@ dependencies = [
     "rich",
     "pytest",
     "mitmproxy",
-    "dotenv"
+    "dotenv",
+    "litellm",
 ]
 
 [project.scripts]

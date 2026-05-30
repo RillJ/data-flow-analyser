@@ -1,8 +1,8 @@
 """Pydantic schemas shared by Data Flow Analyser engine components."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Literal, Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -98,3 +98,63 @@ class CookieLongevityResult(BaseModel):
     # ranging from 6 to 13 months. My scanner applies a conservative heuristic threshold
     # of 90 days (7,776,000 seconds) to flag non-essential tracking cookies
     # with excessive persistence relative to temporary session/campaign tracking.
+
+
+class DataCategoryType(str, Enum):
+    CONTENT_DATA = "content_data"
+    DIAGNOSTIC_DATA = "diagnostic_data"
+    ACCOUNT_DATA = "account_data"
+    SUPPORT_DATA = "support_data"
+    WEBSITE_DATA = "website_data"
+    FEEDBACK_DATA = "feedback_data"
+    OTHER = "other"
+
+
+class DeclaredDataCategory(BaseModel):
+    """Represents a specific category of data declared in vendor documents."""
+    category: DataCategoryType
+    description: str
+    examples_given: List[str] = []
+    citation_excerpt: str  # Verbatim quote from policy for human-in-the-loop verification
+
+
+class DeclaredSubprocessor(BaseModel):
+    """Represents a third party or subprocessor disclosed in the policy or DPA."""
+    name: str
+    domain_or_host: Optional[str] = None
+    purpose: Optional[str] = None
+    country_or_location: Optional[str] = None
+    citation_excerpt: Optional[str] = None
+
+
+class StorageTechnologyType(str, Enum):
+    COOKIE = "cookie"
+    LOCAL_STORAGE = "local_storage"
+    SESSION_STORAGE = "session_storage"
+    PIXEL_BEACON = "pixel_beacon"
+    INDEXED_DB = "indexed_db"
+    OTHER = "other"
+
+
+class DeclaredStorageItem(BaseModel):
+    """
+    Represents a cookie, local storage key, pixel, or other client-side storage technology 
+    disclosed in Cookie Policies or Privacy Policies.
+    """
+    name: str  # example: "_ga", "session_token", "user_preferences"
+    storage_type: StorageTechnologyType = StorageTechnologyType.COOKIE
+    provider: Optional[str] = None  # example: "Google Analytics", "First-Party"
+    purpose: Optional[str] = None  # example: "Analytics", "Strictly Necessary", "Advertising"
+    stated_lifespan: Optional[str] = None  # example: "2 years", "Session", "90 days"
+    citation_excerpt: Optional[str] = None  # Verbatim quote from policy for audit verification
+
+
+class DocumentAnalysisResult(BaseModel):
+    """Structured legal audit extractions from Privacy Policies, DPAs, or Cookie Policies."""
+    document_title: str
+    declared_categories: List[DeclaredDataCategory] = []
+    declared_subprocessors: List[DeclaredSubprocessor] = []
+    declared_storage_items: List[DeclaredStorageItem] = []
+    international_transfer_mechanisms: List[str] = []
+    stated_retention_summary: Optional[str] = None
+    raw_document_length: int = 0
