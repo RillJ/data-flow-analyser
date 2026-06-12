@@ -158,3 +158,58 @@ class DocumentAnalysisResult(BaseModel):
     international_transfer_mechanisms: List[str] = []
     stated_retention_summary: Optional[str] = None
     raw_document_length: int = 0
+
+
+class EndpointClassificationType(str, Enum):
+    INTERNAL = "internal"
+    DOCUMENTED_SUBPROCESSOR = "documented_subprocessor"
+    UNDOCUMENTED_THIRD_PARTY = "undocumented_third_party"
+    TRACKER_UNCONSENTED = "tracker_unconsented"
+
+
+class EndpointClassificationResult(BaseModel):
+    """Classification of an observed network host relative to vendor documentation."""
+    domain: str
+    classification: EndpointClassificationType
+    reasoning: str
+    citation_excerpt: Optional[str] = None  # quote from DPA/Policy if documented
+
+
+class DiscrepancyCategory(str, Enum):
+    UNDOCUMENTED_ENDPOINT = "undocumented_endpoint"
+    UNANNOUNCED_DATA_COLLECTION = "unannounced_data_collection"
+    PURPOSE_MISMATCH = "purpose_mismatch"
+    STORAGE_LIFESPAN_EXCESSIVE = "storage_lifespan_excessive"
+    UNANNOUNCED_STORAGE = "unannounced_storage"
+    UNSAFE_THIRD_COUNTRY_TRANSFER = "unsafe_third_country_transfer"
+    PLAINTEXT_PERSONAL_DATA_LEAK = "plaintext_personal_data_leak"
+
+
+class DiscrepancySeverity(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class ComplianceDiscrepancy(BaseModel):
+    """Represents a specific compliance discrepancy card for human audit review."""
+    discrepancy_id: str
+    title: str
+    category: DiscrepancyCategory
+    severity: DiscrepancySeverity
+    observed_evidence: str  # example: "Plaintext email sent to api.mixpanel.com (US, IP 142.250.179.196)"
+    declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "None declared"
+    remediation_recommendation: str
+
+
+class FullAuditReport(BaseModel):
+    """Complete AI-assisted technical privacy audit report."""
+    audit_title: str
+    summary: str
+    endpoint_classifications: List[EndpointClassificationResult] = []
+    discrepancies: List[ComplianceDiscrepancy] = []
+    total_flows_analyzed: int = 0
+    total_discrepancies_found: int = 0
+    requires_human_verification: bool = True
+
