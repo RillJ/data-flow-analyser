@@ -1,13 +1,28 @@
+"""Tests for the LLMCrossReferencer output parser."""
+
 from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.models.schemas import (
     DiscrepancyCategory,
     DiscrepancySeverity,
     EndpointClassificationType,
+    StorageClassificationResult,
+    StorageClassificationType,
+    StorageTechnologyType,
 )
 
 
 def test_parse_audit_report_json():
     referencer = LLMCrossReferencer()
+
+    mock_fallback_storage = [
+        StorageClassificationResult(
+            name="_ga",
+            storage_type=StorageTechnologyType.COOKIE,
+            observed_lifespan_days=730.0,
+            classification=StorageClassificationType.DOCUMENTED,
+            reasoning="Cookie '_ga' matches declared storage item '_ga'.",
+        )
+    ]
 
     mock_llm_output = """
     {
@@ -33,6 +48,22 @@ def test_parse_audit_report_json():
           "citation_excerpt": null
         }
       ],
+      "storage_classifications": [
+        {
+          "name": "_ga",
+          "storage_type": "cookie",
+          "observed_lifespan_days": 730.0,
+          "classification": "documented",
+          "reasoning": "Cookie '_ga' is disclosed in policy documentation."
+        },
+        {
+          "name": "unannounced_tracker_id",
+          "storage_type": "cookie",
+          "observed_lifespan_days": 180.0,
+          "classification": "undocumented",
+          "reasoning": "Cookie was observed in traffic but is missing from cookie policy."
+        }
+      ],
       "discrepancies": [
         {
           "discrepancy_id": "DISC-001",
@@ -47,16 +78,77 @@ def test_parse_audit_report_json():
     }
     """
 
-    report = referencer._parse_audit_report(mock_llm_output, flow_count=12)
+    report = referencer._parse_audit_report(
+        mock_llm_output,
+        flow_count=12,
+        fallback_storage=mock_fallback_storage,
+    )
 
     assert report.audit_title == "Technical Discrepancy Audit - ACME Portal"
     assert report.total_flows_analyzed == 12
+
+    # Verify Endpoint Classifications
     assert len(report.endpoint_classifications) == 3
     assert report.endpoint_classifications[0].classification == EndpointClassificationType.INTERNAL
-    assert report.endpoint_classifications[2].classification == EndpointClassificationType.UNDOCUMENTED_THIRD_PARTY
-    
+    assert (
+        report.endpoint_classifications[2].classification
+        == EndpointClassificationType.UNDOCUMENTED_THIRD_PARTY
+    )
+
+    # Verify Storage Mechanisms & Cookies
+    assert len(report.storage_classifications) == 2
+    assert report.storage_classifications[0].name == "_ga"
+    assert (
+        report.storage_classifications[0].classification
+        == StorageClassificationType.DOCUMENTED
+    )
+    assert report.storage_classifications[1].name == "unannounced_tracker_id"
+    assert (
+        report.storage_classifications[1].classification
+        == StorageClassificationType.UNDOCUMENTED
+    )
+
+    # Verify Compliance Discrepancies
     assert len(report.discrepancies) == 1
     disc = report.discrepancies[0]
     assert disc.category == DiscrepancyCategory.PLAINTEXT_PERSONAL_DATA_LEAK
     assert disc.severity == DiscrepancySeverity.CRITICAL
     assert "user@example.com" in disc.observed_evidence
+
+
+def test_parse_audit_report_storage_fallback():
+    referencer = LLMCrossReferencer()
+
+    mock_fallback_storage = [
+        StorageClassificationResult(
+            name="_session_id",
+            storage_type=StorageTechnologyType.COOKIE,
+            observed_lifespan_days=None,
+            classification=StorageClassificationType.UNDOCUMENTED,
+            reasoning="Cookie '_session_id' was observed in traffic but missing from policy.",
+        )
+    ]
+
+    # LLM JSON output missing storage_classifications entirely
+    mock_llm_output_no_storage = """
+    {
+      "audit_title": "Technical Discrepancy Audit",
+      "summary": "Basic audit summary.",
+      "endpoint_classifications": [],
+      "discrepancies": []
+    }
+    """
+
+    report = referencer._parse_audit_report(
+        mock_llm_output_no_storage,
+        flow_count=5,
+        fallback_storage=mock_fallback_storage,
+    )
+
+    # Asserts fallback storage was applied when missing from LLM response
+    assert len(report.storage_classifications) == 1
+    assert report.storage_classifications[0].name == "_session_id"
+    assert (
+        report.storage_classifications[0].classification
+        == StorageClassificationType.UNDOCUMENTED
+    )

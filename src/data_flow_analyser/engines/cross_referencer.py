@@ -2,6 +2,7 @@ import json
 from typing import Any, Dict, List, Optional, cast
 from litellm import ModelResponse, completion
 
+from data_flow_analyser.engines.storage_profiler import StorageProfiler
 from data_flow_analyser.models.schemas import (
     ComplianceDiscrepancy,
     CookieLongevityResult,
@@ -13,6 +14,9 @@ from data_flow_analyser.models.schemas import (
     FullAuditReport,
     NetworkFlow,
     ObservedEndpoint,
+    StorageClassificationResult,
+    StorageClassificationType,
+    StorageTechnologyType,
     TrackingToken,
 )
 
@@ -27,7 +31,13 @@ You must produce an auditable report evaluating:
    - "undocumented_third_party": Third-party host not mentioned in vendor documents.
    - "tracker_unconsented": Known advertising/tracking domain operating without explicit consent documentation.
 
-2. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. Look for:
+2. STORAGE MECHANISM CLASSIFICATION: Classify each observed cookie or storage mechanism into one of:
+   - "documented": Explicitly disclosed in policy/cookie documentation with matching duration/purpose.
+   - "undocumented": Cookie/storage item observed in traffic but absent from declarations.
+   - "excessive_lifespan": Cookie duration exceeds stated lifespan or 90-day recommended window.
+   - "purpose_mismatch": Observed usage conflicts with declared storage purpose.
+
+3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. Look for:
    - Undocumented endpoints receiving data.
    - Personal data transmission (plaintext or hashed) sent to third parties or without consent.
    - Data collection exceeding stated categories (like: ACCOUNT_DATA sent to DIAGNOSTIC_DATA endpoints).
@@ -46,6 +56,15 @@ Respond strictly in JSON matching this schema:
       "classification": "internal|documented_subprocessor|undocumented_third_party|tracker_unconsented",
       "reasoning": "Detailed justification based solely on policy context",
       "citation_excerpt": "Verbatim quote from policy if documented, else null"
+    }
+  ],
+  "storage_classifications": [
+    {
+      "name": "_ga",
+      "storage_type": "cookie|local_storage|session_storage|pixel_beacon|indexed_db|other",
+      "observed_lifespan_days": 730.0,
+      "classification": "documented|undocumented|excessive_lifespan|purpose_mismatch",
+      "reasoning": "Detailed justification comparing wire traffic with cookie policy disclosures"
     }
   ],
   "discrepancies": [
@@ -78,6 +97,7 @@ class LLMCrossReferencer:
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
+        self.storage_profiler = StorageProfiler()
 
     def cross_reference_audit(
         self,
@@ -95,8 +115,20 @@ class LLMCrossReferencer:
         entropy_tokens = entropy_tokens or []
         cookie_results = cookie_results or []
 
+        # Run rule-based storage profiling first to reconcile observed storage against policy
+        rule_based_storage_eval = self.storage_profiler.reconcile_storage(
+            flows=flows,
+            cookie_results=cookie_results,
+            declared_storage=doc_analysis.declared_storage_items,
+        )
+
         evidence_summary = self._prepare_evidence_summary(
-            flows, endpoints, seed_matches, entropy_tokens, cookie_results
+            flows,
+            endpoints,
+            seed_matches,
+            entropy_tokens,
+            cookie_results,
+            rule_based_storage_eval,
         )
 
         document_context = doc_analysis.model_dump(mode="json")
@@ -106,13 +138,13 @@ class LLMCrossReferencer:
         Title: {doc_analysis.document_title}
         Document Length: {doc_analysis.raw_document_length} characters
 
-        Declared Categories:
+        Declared Data Categories:
         {json.dumps(document_context.get('declared_categories', []), indent=2)}
 
         Declared Subprocessors:
         {json.dumps(document_context.get('declared_subprocessors', []), indent=2)}
 
-        Declared Storage Items:
+        Declared Storage Items (Cookies / Web Storage):
         {json.dumps(document_context.get('declared_storage_items', []), indent=2)}
 
         International Transfer Safeguards Declared: {doc_analysis.international_transfer_mechanisms}
@@ -131,19 +163,19 @@ class LLMCrossReferencer:
                     model=self.model,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt_content}
+                        {"role": "user", "content": prompt_content},
                     ],
                     response_format={"type": "json_object"},
                     api_key=self.api_key,
                     api_base=self.api_base,
-                )
+                ),
             )
 
             if not response.choices or not response.choices[0].message:
                 return FullAuditReport(
                     audit_title="Technical Audit (Failed)",
                     summary="Failed to get response choices from LLM.",
-                    total_flows_analyzed=len(flows)
+                    total_flows_analyzed=len(flows),
                 )
 
             raw_json_str: Optional[str] = response.choices[0].message.content
@@ -151,17 +183,18 @@ class LLMCrossReferencer:
                 return FullAuditReport(
                     audit_title="Technical Audit (Empty Response)",
                     summary="LLM returned empty output.",
-                    total_flows_analyzed=len(flows)
+                    total_flows_analyzed=len(flows),
                 )
 
-            return self._parse_audit_report(raw_json_str, len(flows))
+            return self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
 
         except Exception as e:
             print(f"[Warning] LLM Cross-Referencer execution failed ({self.model}): {e}")
             return FullAuditReport(
                 audit_title="Technical Privacy Audit",
                 summary=f"Analysis encountered an execution error: {str(e)}",
-                total_flows_analyzed=len(flows)
+                storage_classifications=rule_based_storage_eval,
+                total_flows_analyzed=len(flows),
             )
 
     def _prepare_evidence_summary(
@@ -171,6 +204,7 @@ class LLMCrossReferencer:
         seed_matches: List[Dict[str, Any]],
         entropy_tokens: List[TrackingToken],
         cookie_results: List[CookieLongevityResult],
+        storage_evaluations: List[StorageClassificationResult],
     ) -> Dict[str, Any]:
         """Summarizes low-level network vectors into a clean structure for the prompt."""
         endpoint_summary = [
@@ -190,19 +224,29 @@ class LLMCrossReferencer:
         seed_summary = []
         for match in seed_matches:
             if isinstance(match, dict):
-                seed_summary.append({
-                    "matched_value": match.get("matched_value") or match.get("raw_value") or match.get("value"),
-                    "type": match.get("field_type") or match.get("key") or match.get("type", "unknown"),
-                    "location": match.get("location") or match.get("found_in", "unknown"),
-                    "is_hashed": match.get("is_hashed", False),
-                })
+                seed_summary.append(
+                    {
+                        "matched_value": match.get("matched_value")
+                        or match.get("raw_value")
+                        or match.get("value"),
+                        "type": match.get("field_type")
+                        or match.get("key")
+                        or match.get("type", "unknown"),
+                        "location": match.get("location") or match.get("found_in", "unknown"),
+                        "is_hashed": match.get("is_hashed", False),
+                    }
+                )
             else:
-                seed_summary.append({
-                    "matched_value": getattr(match, "matched_value", getattr(match, "raw_value", str(match))),
-                    "type": getattr(match, "field_type", getattr(match, "key", "unknown")),
-                    "location": getattr(match, "location", "unknown"),
-                    "is_hashed": getattr(match, "is_hashed", False),
-                })
+                seed_summary.append(
+                    {
+                        "matched_value": getattr(
+                            match, "matched_value", getattr(match, "raw_value", str(match))
+                        ),
+                        "type": getattr(match, "field_type", getattr(match, "key", "unknown")),
+                        "location": getattr(match, "location", "unknown"),
+                        "is_hashed": getattr(match, "is_hashed", False),
+                    }
+                )
 
         entropy_summary = [
             {
@@ -213,23 +257,30 @@ class LLMCrossReferencer:
             for tok in entropy_tokens
         ]
 
-        cookie_summary = [
+        storage_summary = [
             {
-                "name": c.cookie_name,
-                "lifespan_days": c.lifespan_days,
-                "is_excessive": c.is_excessive_longevity,
+                "name": item.name,
+                "type": item.storage_type.value,
+                "observed_lifespan_days": item.observed_lifespan_days,
+                "classification": item.classification.value,
+                "reasoning": item.reasoning,
             }
-            for c in cookie_results
+            for item in storage_evaluations
         ]
 
         return {
             "observed_endpoints": endpoint_summary,
             "personal_data_seed_leaks": seed_summary,
             "high_entropy_tokens": entropy_summary,
-            "set_cookie_longevity": cookie_summary,
+            "observed_storage_evaluations": storage_summary,
         }
 
-    def _parse_audit_report(self, raw_json_str: str, flow_count: int) -> FullAuditReport:
+    def _parse_audit_report(
+        self,
+        raw_json_str: str,
+        flow_count: int,
+        fallback_storage: List[StorageClassificationResult],
+    ) -> FullAuditReport:
         """Parses LLM output into typed FullAuditReport schema."""
         try:
             data = json.loads(raw_json_str)
@@ -251,6 +302,34 @@ class LLMCrossReferencer:
                     )
                 )
 
+            storage_classifications = []
+            for item in data.get("storage_classifications", []):
+                st_type_str = item.get("storage_type", "cookie").lower()
+                try:
+                    st_type = StorageTechnologyType(st_type_str)
+                except ValueError:
+                    st_type = StorageTechnologyType.COOKIE
+
+                cls_type_str = item.get("classification", "undocumented").lower()
+                try:
+                    cls_type = StorageClassificationType(cls_type_str)
+                except ValueError:
+                    cls_type = StorageClassificationType.UNDOCUMENTED
+
+                storage_classifications.append(
+                    StorageClassificationResult(
+                        name=item.get("name", "unknown"),
+                        storage_type=st_type,
+                        observed_lifespan_days=item.get("observed_lifespan_days"),
+                        classification=cls_type,
+                        reasoning=item.get("reasoning", ""),
+                    )
+                )
+
+            # Fallback to rule-based storage classifications if LLM returned none
+            if not storage_classifications:
+                storage_classifications = fallback_storage
+
             discrepancies = []
             for disc in data.get("discrepancies", []):
                 cat_str = disc.get("category", "undocumented_endpoint").lower()
@@ -267,7 +346,9 @@ class LLMCrossReferencer:
 
                 discrepancies.append(
                     ComplianceDiscrepancy(
-                        discrepancy_id=disc.get("discrepancy_id", f"DISC-{len(discrepancies)+1:03d}"),
+                        discrepancy_id=disc.get(
+                            "discrepancy_id", f"DISC-{len(discrepancies)+1:03d}"
+                        ),
                         title=disc.get("title", "Discrepancy Found"),
                         category=cat,
                         severity=sev,
@@ -281,6 +362,7 @@ class LLMCrossReferencer:
                 audit_title=data.get("audit_title", "Technical Privacy Discrepancy Audit"),
                 summary=data.get("summary", ""),
                 endpoint_classifications=endpoint_classifications,
+                storage_classifications=storage_classifications,
                 discrepancies=discrepancies,
                 total_flows_analyzed=flow_count,
                 total_discrepancies_found=len(discrepancies),
@@ -291,5 +373,6 @@ class LLMCrossReferencer:
             return FullAuditReport(
                 audit_title="Technical Privacy Audit (Parsing Fallback)",
                 summary="Raw LLM output could not be fully parsed into structured JSON.",
+                storage_classifications=fallback_storage,
                 total_flows_analyzed=flow_count,
             )

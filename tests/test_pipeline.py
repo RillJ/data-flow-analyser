@@ -1,5 +1,6 @@
 import json
 from unittest.mock import MagicMock, patch
+
 from data_flow_analyser.models.schemas import FullAuditReport
 from data_flow_analyser.pipeline import AuditPipeline
 
@@ -20,6 +21,7 @@ def test_pipeline_execution(
     mock_flow.request_headers = {"Host": "api.mixpanel.com"}
     mock_flow.request_body = '{"email": "user@test.com"}'
     mock_flow.cookies_sent = {}
+    mock_flow.cookies_set = {"mp_id": "123"}
     mock_flow.response_headers = {"Set-Cookie": "mp_id=123; Max-Age=315360000"}
     mock_flow.timestamp = None
 
@@ -35,9 +37,18 @@ def test_pipeline_execution(
                     "raw_document_length": 100,
                     "declared_categories": [],
                     "declared_subprocessors": [],
-                    "declared_storage_items": [],
+                    "declared_storage_items": [
+                        {
+                            "name": "mp_id",
+                            "storage_type": "cookie",
+                            "provider": "Mixpanel",
+                            "purpose": "Analytics",
+                            "stated_lifespan": "30 days",
+                            "citation_excerpt": "We store mp_id for 30 days."
+                        }
+                    ],
                     "international_transfer_mechanisms": [],
-                    "stated_retention_summary": None
+                    "stated_retention_summary": None,
                 })
             )
         )
@@ -51,13 +62,22 @@ def test_pipeline_execution(
             message=MagicMock(
                 content=json.dumps({
                     "audit_title": "Technical Discrepancy Audit",
-                    "summary": "Found undocumented third party transmitting PII.",
+                    "summary": "Found undocumented third party transmitting personal data.",
                     "endpoint_classifications": [
                         {
                             "domain": "api.mixpanel.com",
                             "classification": "undocumented_third_party",
                             "reasoning": "Not mentioned in policy.",
-                            "citation_excerpt": None
+                            "citation_excerpt": None,
+                        }
+                    ],
+                    "storage_classifications": [
+                        {
+                            "name": "mp_id",
+                            "storage_type": "cookie",
+                            "observed_lifespan_days": 3650.0,
+                            "classification": "excessive_lifespan",
+                            "reasoning": "Cookie 'mp_id' has an observed lifespan of 10 years (3650 days), exceeding declared retention of 30 days.",
                         }
                     ],
                     "discrepancies": [
@@ -68,9 +88,9 @@ def test_pipeline_execution(
                             "severity": "HIGH",
                             "observed_evidence": "Transmitted user email to api.mixpanel.com",
                             "declared_claim_quote": "Not declared",
-                            "remediation_recommendation": "Disclose Mixpanel in DPA"
+                            "remediation_recommendation": "Disclose Mixpanel in DPA",
                         }
-                    ]
+                    ],
                 })
             )
         )
@@ -89,10 +109,15 @@ def test_pipeline_execution(
     report = pipeline.run(
         flow_file_path=flow_file,
         documents=[doc1, doc2],
-        seed_data={"email": "user@test.com"}
+        seed_data={"email": "user@test.com"},
     )
 
     assert isinstance(report, FullAuditReport)
     assert report.total_flows_analyzed == 1
     assert report.total_discrepancies_found == 1
     assert report.discrepancies[0].discrepancy_id == "DISC-001"
+    
+    # Verify storage classifications were evaluated and included
+    assert len(report.storage_classifications) == 1
+    assert report.storage_classifications[0].name == "mp_id"
+    assert report.storage_classifications[0].classification.value == "excessive_lifespan"

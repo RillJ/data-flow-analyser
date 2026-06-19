@@ -39,6 +39,19 @@ class ReportExporter:
                 )
             md.append("\n")
 
+        md.append("## Storage Mechanisms & Cookie Classifications\n")
+        if not report.storage_classifications:
+            md.append("_No storage mechanisms or cookies recorded/analyzed._\n")
+        else:
+            md.append("| Name | Type | Observed Duration (Days) | Classification | Reasoning |")
+            md.append("| --- | --- | --- | --- | --- |")
+            for st in report.storage_classifications:
+                days_str = f"{st.observed_lifespan_days:.1f}" if st.observed_lifespan_days is not None else "Session/Unknown"
+                md.append(
+                    f"| `{st.name}` | {st.storage_type.value} | {days_str} | **{st.classification.value}** | {st.reasoning} |"
+                )
+            md.append("\n")
+
         md.append("## Detected Compliance Discrepancies\n")
         if not report.discrepancies:
             md.append("_No discrepancies detected between observed traffic and policy claims._\n")

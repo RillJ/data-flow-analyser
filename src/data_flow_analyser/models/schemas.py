@@ -25,7 +25,7 @@ class NetworkFlow(BaseModel):
 
 
 class SeedData(BaseModel):
-    """Injected test data and lookup hashes used to identify exposed values."""
+    """Injected test data and lookup hashes used to identify exposed personal data values."""
 
     raw_values: Dict[str, str] = Field(default_factory=dict)
     hash_map: Dict[str, str] = Field(default_factory=dict)
@@ -33,13 +33,14 @@ class SeedData(BaseModel):
 
 class ObservedEndpoint(BaseModel):
     """A network destination with entity profiling and geolocation."""
+
     domain: str
     ip_address: Optional[str] = None
     reverse_dns: Optional[str] = None
-    parent_entity: Optional[str] = None   # like: "Google LLC"
-    category: str = "unknown"             # like: "internal", "subprocessor", "third_party_tracker", "unknown"
-    country_code: Optional[str] = None    # like: "US", "NL", "DE"
-    asn_org: Optional[str] = None         # like: "Amazon.com, Inc.", "Cloudflare, Inc."
+    parent_entity: Optional[str] = None  # like: "Google LLC"
+    category: str = "unknown"  # like: "internal", "subprocessor", "third_party_tracker", "unknown"
+    country_code: Optional[str] = None  # like: "US", "NL", "DE"
+    asn_org: Optional[str] = None  # like: "Amazon.com, Inc.", "Cloudflare, Inc."
     is_third_country_transfer: bool = False  # Flagged if traffic leaves origin country
     is_undocumented: bool = False
 
@@ -55,9 +56,9 @@ class PolicyStatement(BaseModel):
 
 
 class RiskComponents(BaseModel):
-    """Individual normalied factors contributing to a network flow risk score."""
+    """Individual normalized factors contributing to a network flow risk score."""
 
-    data_sensitivity_score: float = Field(ge=0.0, le=10.0, description="S(D_pii)")
+    data_sensitivity_score: float = Field(ge=0.0, le=10.0, description="S(D_personal_data)")
     subprocessor_status_score: float = Field(ge=0.0, le=10.0, description="P(E_sub)")
     tracker_category_score: float = Field(ge=0.0, le=10.0, description="T(C_track)")
 
@@ -76,8 +77,10 @@ class PrivacyDiscrepancy(BaseModel):
     )
     components: RiskComponents
 
+
 class TrackingToken(BaseModel):
     """Represents a high-entropy string candidate flagged as a dynamic identifier."""
+
     token: str
     location: str  # example: "cookies_sent.session_id", "request_body.meta.visitor_id"
     entropy: float
@@ -86,18 +89,13 @@ class TrackingToken(BaseModel):
 
 class CookieLongevityResult(BaseModel):
     """Represents cookie lifespan analysis from Set-Cookie headers."""
+
     cookie_name: str
     cookie_value: str
     max_age_seconds: Optional[int] = None
     expires_at: Optional[datetime] = None
     lifespan_days: Optional[float] = None
     is_excessive_longevity: bool = False  # True if > 90 days.
-    # While EU regulations do not prescribe a universal numeric cap on cookie lifespans,
-    # GDPR Art. 5(1)(e) mandates storage limitation proportional to purpose.
-    # National DPAs (like from CNIL, Irish DPC) recommend maximum cookie retention windows
-    # ranging from 6 to 13 months. My scanner applies a conservative heuristic threshold
-    # of 90 days (7,776,000 seconds) to flag non-essential tracking cookies
-    # with excessive persistence relative to temporary session/campaign tracking.
 
 
 class DataCategoryType(str, Enum):
@@ -111,7 +109,8 @@ class DataCategoryType(str, Enum):
 
 
 class DeclaredDataCategory(BaseModel):
-    """Represents a specific category of data declared in vendor documents."""
+    """Represents a specific category of personal data declared in vendor documents."""
+
     category: DataCategoryType
     description: str
     examples_given: List[str] = []
@@ -120,6 +119,7 @@ class DeclaredDataCategory(BaseModel):
 
 class DeclaredSubprocessor(BaseModel):
     """Represents a third party or subprocessor disclosed in the policy or DPA."""
+
     name: str
     domain_or_host: Optional[str] = None
     purpose: Optional[str] = None
@@ -138,9 +138,10 @@ class StorageTechnologyType(str, Enum):
 
 class DeclaredStorageItem(BaseModel):
     """
-    Represents a cookie, local storage key, pixel, or other client-side storage technology 
+    Represents a cookie, local storage key, pixel, or other client-side storage technology
     disclosed in Cookie Policies or Privacy Policies.
     """
+
     name: str  # example: "_ga", "session_token", "user_preferences"
     storage_type: StorageTechnologyType = StorageTechnologyType.COOKIE
     provider: Optional[str] = None  # example: "Google Analytics", "First-Party"
@@ -149,8 +150,27 @@ class DeclaredStorageItem(BaseModel):
     citation_excerpt: Optional[str] = None  # Verbatim quote from policy for audit verification
 
 
+class StorageClassificationType(str, Enum):
+    DOCUMENTED = "documented"
+    UNDOCUMENTED = "undocumented"
+    EXCESSIVE_LIFESPAN = "excessive_lifespan"
+    PURPOSE_MISMATCH = "purpose_mismatch"
+
+
+class StorageClassificationResult(BaseModel):
+    """Reconciled evaluation of an observed client-side storage mechanism or cookie against declared policies."""
+
+    name: str
+    storage_type: StorageTechnologyType = StorageTechnologyType.COOKIE
+    observed_lifespan_days: Optional[float] = None
+    classification: StorageClassificationType
+    reasoning: str
+    declared_match: Optional[DeclaredStorageItem] = None
+
+
 class DocumentAnalysisResult(BaseModel):
     """Structured legal audit extractions from Privacy Policies, DPAs, or Cookie Policies."""
+
     document_title: str
     declared_categories: List[DeclaredDataCategory] = []
     declared_subprocessors: List[DeclaredSubprocessor] = []
@@ -169,6 +189,7 @@ class EndpointClassificationType(str, Enum):
 
 class EndpointClassificationResult(BaseModel):
     """Classification of an observed network host relative to vendor documentation."""
+
     domain: str
     classification: EndpointClassificationType
     reasoning: str
@@ -194,22 +215,24 @@ class DiscrepancySeverity(str, Enum):
 
 class ComplianceDiscrepancy(BaseModel):
     """Represents a specific compliance discrepancy card for human audit review."""
+
     discrepancy_id: str
     title: str
     category: DiscrepancyCategory
     severity: DiscrepancySeverity
     observed_evidence: str  # example: "Plaintext email sent to api.mixpanel.com (US, IP 142.250.179.196)"
-    declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "None declared"
+    declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "Not declared"
     remediation_recommendation: str
 
 
 class FullAuditReport(BaseModel):
     """Complete AI-assisted technical privacy audit report."""
+
     audit_title: str
     summary: str
     endpoint_classifications: List[EndpointClassificationResult] = []
+    storage_classifications: List[StorageClassificationResult] = []
     discrepancies: List[ComplianceDiscrepancy] = []
     total_flows_analyzed: int = 0
     total_discrepancies_found: int = 0
     requires_human_verification: bool = True
-
