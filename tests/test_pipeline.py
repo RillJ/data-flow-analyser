@@ -14,6 +14,7 @@ def test_pipeline_execution(
     mock_crossref_completion: MagicMock,
     tmp_path,
 ):
+    """Verifies that the audit pipeline runs correctly when given multiple documents."""
     mock_flow = MagicMock()
     mock_flow.flow_id = "flow-001"
     mock_flow.host = "api.mixpanel.com"
@@ -121,3 +122,9 @@ def test_pipeline_execution(
     assert len(report.storage_classifications) == 1
     assert report.storage_classifications[0].name == "mp_id"
     assert report.storage_classifications[0].classification.value == "excessive_lifespan"
+
+    # Verify both documents were ingested
+    ingestor_call_kwargs = mock_ingestor_completion.call_args[1]
+    ingestor_prompt = ingestor_call_kwargs["messages"][1]["content"]
+    assert "privacy.txt" in ingestor_prompt or "We respect user privacy." in ingestor_prompt
+    assert "cookies.md" in ingestor_prompt or "Cookies stored up to 30 days." in ingestor_prompt
