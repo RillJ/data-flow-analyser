@@ -6,7 +6,7 @@ from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.engines.document_ingestor import PolicyDocumentIngestor
 from data_flow_analyser.engines.endpoint_profiler import EndpointProfiler
 from data_flow_analyser.engines.entropy import (
-    analyze_flow_identifiers,
+    analyse_flow_identifiers,
 )
 from data_flow_analyser.engines.seed_hasher import (
     generate_seed_hash_map,
@@ -51,10 +51,6 @@ class AuditPipeline:
         flow_file_path: Optional[Union[str, Path]] = None,
         documents: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         seed_data: Optional[Union[SeedData, Dict[str, str]]] = None,
-        # Backward-compatibility aliases
-        har_file_path: Optional[Union[str, Path]] = None,
-        document_text: Optional[str] = None,
-        document_title: Optional[str] = None,
     ) -> FullAuditReport:
         """
         Executes the full end-to-end privacy audit pipeline.
@@ -67,11 +63,11 @@ class AuditPipeline:
         Returns:
             FullAuditReport containing endpoint classifications and discrepancy cards.
         """
-        target_flow_path = flow_file_path or har_file_path
+        target_flow_path = flow_file_path
         if not target_flow_path:
             raise ValueError("Must provide a flow capture file path.")
 
-        target_docs = documents or document_text
+        target_docs = documents
         if not target_docs:
             raise ValueError("Must provide at least one document or text input.")
 
@@ -79,24 +75,46 @@ class AuditPipeline:
         logger.info(f"Loading and parsing mitmproxy flow capture file: {path_str}")
         flows: List[NetworkFlow] = parse_flow_file(path_str)
         logger.info(f"Extracted {len(flows)} total network flows.")
+        for index, flow in enumerate(flows, start=1):
+            logger.debug(
+                "Flow %d/%d parsed: id=%s method=%s host=%s url=%s request_headers=%d "
+                "request_body_chars=%d response_status=%s response_headers=%d",
+                index, len(flows), flow.flow_id, flow.method, flow.host, flow.url,
+                len(flow.request_headers), len(flow.request_body or ""),
+                flow.response_status, len(flow.response_headers),
+            )
 
         # Profile observed endpoints
         endpoints: List[ObservedEndpoint] = self._profile_endpoints(flows)
         logger.info(f"Profiled {len(endpoints)} unique domain endpoints.")
+        for endpoint in endpoints:
+            logger.debug(
+                "Endpoint profile: domain=%s category=%s parent_entity=%s ip=%s country=%s",
+                endpoint.domain,
+                endpoint.category,
+                endpoint.parent_entity,
+                endpoint.ip_address,
+                endpoint.country_code,
+            )
 
         # Personal data seed matching
         seed_matches: List[Dict[str, Any]] = self._scan_seed_matches(flows, seed_data)
         if seed_matches:
-            logger.info(f"Detected {len(seed_matches)} PII seed occurrences in network flows.")
+            logger.info(f"Detected {len(seed_matches)} personal data seed occurrences in network flows.")
+        logger.debug("Seed matching complete: %d matches", len(seed_matches))
 
         # Entropy tokens & cookie longevity
         entropy_tokens: List[TrackingToken] = []
         cookie_results: List[CookieLongevityResult] = []
 
         for flow in flows:
-            tokens, cookies = analyze_flow_identifiers(flow)
+            tokens, cookies = analyse_flow_identifiers(flow)
             entropy_tokens.extend(tokens)
             cookie_results.extend(cookies)
+            logger.debug(
+                "Identifier analysis: flow_id=%s entropy_tokens=%d cookie_records=%d",
+                flow.flow_id, len(tokens), len(cookies),
+            )
 
         logger.info(
             f"Extracted {len(entropy_tokens)} high-entropy tokens "
@@ -105,12 +123,11 @@ class AuditPipeline:
 
         # Ingest disclosure document(s)
         combined_text, auto_title = self._aggregate_documents(target_docs)
-        effective_title = document_title or auto_title
-        logger.info(f"Analyzing documentation: '{effective_title}' ({len(combined_text)} chars)")
+        logger.info(f"Analysing documentation: '{auto_title}' ({len(combined_text)} chars)")
 
-        doc_analysis = self.doc_ingestor.analyze_document_text(
+        doc_analysis = self.doc_ingestor.analyse_document_text(
             text_content=combined_text,
-            document_title=effective_title,
+            document_title=auto_title,
         )
 
         # Cross-reference technical evidence vs. declared claims
@@ -153,6 +170,7 @@ class AuditPipeline:
 
         combined_text = "\n\n".join(text_blocks)
         combined_title = " + ".join(titles) if titles else "Vendor Disclosures"
+        logger.debug("Documents aggregated: count=%d title=%s chars=%d", len(text_blocks), combined_title, len(combined_text))
         return combined_text, combined_title
 
     def _profile_endpoints(self, flows: List[NetworkFlow]) -> List[ObservedEndpoint]:
@@ -164,6 +182,7 @@ class AuditPipeline:
             host = flow.host
             if host and host not in seen_hosts:
                 seen_hosts.add(host)
+                logger.debug("Profiling endpoint %d: host=%s", len(seen_hosts), host)
                 profiled = self.endpoint_profiler.profile_endpoint(domain=host)
                 endpoints.append(profiled)
 
@@ -197,6 +216,11 @@ class AuditPipeline:
                 if not target_payload:
                     continue
                 found_tuples = scan_for_seed_matches(target_payload, seed_data)
+                if found_tuples:
+                    logger.debug(
+                        "Seed matches: flow_id=%s location=%s count=%d",
+                        flow.flow_id, location_name, len(found_tuples),
+                    )
                 for matched_val, label in found_tuples:
                     matches.append(
                         {

@@ -1,7 +1,10 @@
 import base64
 import json
+import logging
 import urllib.parse
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def recursive_decode(payload: Any, max_depth: int = 6, current_depth: int = 0) -> Any:
@@ -19,6 +22,7 @@ def recursive_decode(payload: Any, max_depth: int = 6, current_depth: int = 0) -
         The decoded structure or the original value when no decoding applies.
     """
     if current_depth >= max_depth:
+        logger.debug("Decode max depth reached: depth=%d", current_depth)
         return payload
 
     if isinstance(payload, dict):
@@ -44,6 +48,7 @@ def recursive_decode(payload: Any, max_depth: int = 6, current_depth: int = 0) -
        (current_val.startswith("[") and current_val.endswith("]")):
         try:
             parsed_json = json.loads(current_val)
+            logger.debug("Decoded JSON payload: depth=%d chars=%d", current_depth, len(current_val))
             return recursive_decode(parsed_json, max_depth, current_depth + 1)
         except Exception:
             pass
@@ -62,6 +67,7 @@ def recursive_decode(payload: Any, max_depth: int = 6, current_depth: int = 0) -
     try:
         unquoted = urllib.parse.unquote(current_val)
         if unquoted != current_val:
+            logger.debug("Decoded URL-encoded payload: depth=%d chars=%d", current_depth, len(current_val))
             return recursive_decode(unquoted, max_depth, current_depth + 1)
     except Exception:
         pass

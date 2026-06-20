@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Optional, cast
 from litellm import ModelResponse, completion
 
@@ -10,6 +11,8 @@ from data_flow_analyser.models.schemas import (
     DocumentAnalysisResult,
     StorageTechnologyType,
 )
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an expert Privacy Legal Auditor conducting a Data Protection Impact Assessment (DPIA).
@@ -81,15 +84,28 @@ class PolicyDocumentIngestor:
         self.api_key = api_key
         self.api_base = api_base
 
-    def analyze_document_text(
+    def analyse_document_text(
         self,
         text_content: str,
         document_title: str = "Vendor Legal Document"
     ) -> DocumentAnalysisResult:
+        logger.debug("Document ingestion started: title=%s chars=%d model=%s", document_title, len(text_content), self.model)
         if not text_content.strip():
+            logger.debug("Document ingestion skipped: empty document")
             return DocumentAnalysisResult(document_title=document_title)
 
         try:
+            user_prompt = (
+                f"Document Title: {document_title}\n\n"
+                f"Document Text:\n{text_content[:25000]}"
+            )
+            logger.debug(
+                "LLM request (document_ingestor) BEGIN: model=%s messages=2 response_format=json_object",
+                self.model,
+            )
+            logger.debug("LLM request (document_ingestor) system prompt:\n%s", SYSTEM_PROMPT)
+            logger.debug("LLM request (document_ingestor) user prompt:\n%s", user_prompt)
+            logger.debug("LLM request (document_ingestor) END")
             # Cast completion output to ModelResponse so Pyright knows choices exists
             response = cast(
                 ModelResponse,
@@ -99,7 +115,7 @@ class PolicyDocumentIngestor:
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {
                             "role": "user",
-                            "content": f"Document Title: {document_title}\n\nDocument Text:\n{text_content[:25000]}"
+                            "content": user_prompt,
                         }
                     ],
                     response_format={"type": "json_object"},
@@ -107,6 +123,7 @@ class PolicyDocumentIngestor:
                     api_base=self.api_base,
                 )
             )
+            logger.debug("Document LLM response received: choices=%d", len(response.choices or []))
 
             # Defensive validation check
             if not response.choices or not response.choices[0].message:
@@ -124,14 +141,18 @@ class PolicyDocumentIngestor:
                     raw_document_length=len(text_content)
                 )
 
-            return self._parse_llm_json(raw_json_str, document_title, len(text_content))
+            result = self._parse_llm_json(raw_json_str, document_title, len(text_content))
+            logger.debug("Document analysis parsed: categories=%d subprocessors=%d storage_items=%d", len(result.declared_categories), len(result.declared_subprocessors), len(result.declared_storage_items))
+            return result
 
         except Exception as e:
-            print(f"[Warning] LiteLLM document extraction failed ({self.model}): {e}")
-            return DocumentAnalysisResult(
+            logger.exception("Document extraction failed: model=%s error=%s", self.model, e)
+            result = DocumentAnalysisResult(
                 document_title=document_title,
                 raw_document_length=len(text_content)
             )
+            logger.debug("Document JSON parsed: categories=%d subprocessors=%d storage_items=%d", len(categories), len(subprocessors), len(storage_items))
+            return result
 
     def _parse_llm_json(
         self,
@@ -204,5 +225,6 @@ class PolicyDocumentIngestor:
                 raw_document_length=raw_length,
             )
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            logger.warning("Document JSON parsing fallback: title=%s error=%s", document_title, error)
             return DocumentAnalysisResult(document_title=document_title, raw_document_length=raw_length)

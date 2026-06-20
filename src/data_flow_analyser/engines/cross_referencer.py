@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, Dict, List, Optional, cast
 from litellm import ModelResponse, completion
 
@@ -19,6 +20,8 @@ from data_flow_analyser.models.schemas import (
     StorageTechnologyType,
     TrackingToken,
 )
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are an expert Privacy Legal Auditor conducting a technical Data Protection Impact Assessment (DPIA).
@@ -114,6 +117,7 @@ class LLMCrossReferencer:
         seed_matches = seed_matches or []
         entropy_tokens = entropy_tokens or []
         cookie_results = cookie_results or []
+        logger.debug("Cross-reference started: flows=%d endpoints=%d seed_matches=%d tokens=%d cookie_records=%d", len(flows), len(endpoints), len(seed_matches), len(entropy_tokens), len(cookie_results))
 
         # Run rule-based storage profiling first to reconcile observed storage against policy
         rule_based_storage_eval = self.storage_profiler.reconcile_storage(
@@ -130,6 +134,7 @@ class LLMCrossReferencer:
             cookie_results,
             rule_based_storage_eval,
         )
+        logger.debug("Evidence summary prepared: endpoints=%d seed_leaks=%d entropy_tokens=%d storage_items=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_seed_leaks"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]))
 
         document_context = doc_analysis.model_dump(mode="json")
 
@@ -157,6 +162,13 @@ class LLMCrossReferencer:
         """
 
         try:
+            logger.debug(
+                "LLM request (cross_referencer) BEGIN: model=%s messages=2 response_format=json_object",
+                self.model,
+            )
+            logger.debug("LLM request (cross_referencer) system prompt:\n%s", SYSTEM_PROMPT)
+            logger.debug("LLM request (cross_referencer) user prompt:\n%s", prompt_content)
+            logger.debug("LLM request (cross_referencer) END")
             response = cast(
                 ModelResponse,
                 completion(
@@ -170,6 +182,7 @@ class LLMCrossReferencer:
                     api_base=self.api_base,
                 ),
             )
+            logger.debug("Cross-reference LLM response received: choices=%d", len(response.choices or []))
 
             if not response.choices or not response.choices[0].message:
                 return FullAuditReport(
@@ -186,10 +199,12 @@ class LLMCrossReferencer:
                     total_flows_analyzed=len(flows),
                 )
 
-            return self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
+            report = self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
+            logger.debug("Cross-reference report parsed: endpoint_results=%d storage_results=%d discrepancies=%d", len(report.endpoint_classifications), len(report.storage_classifications), len(report.discrepancies))
+            return report
 
         except Exception as e:
-            print(f"[Warning] LLM Cross-Referencer execution failed ({self.model}): {e}")
+            logger.exception("Cross-reference execution failed: model=%s error=%s", self.model, e)
             return FullAuditReport(
                 audit_title="Technical Privacy Audit",
                 summary=f"Analysis encountered an execution error: {str(e)}",

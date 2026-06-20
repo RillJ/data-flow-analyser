@@ -28,6 +28,7 @@ class StorageProfiler:
         Cross-references cookies and storage mechanisms gathered from network traffic against declared storage items.
         """
         results: List[StorageClassificationResult] = []
+        logger.debug("Storage profiling started: flows=%d cookie_records=%d declared_items=%d", len(flows), len(cookie_results), len(declared_storage))
 
         # Collect unique set of observed cookie names across sent/set cookies & longevity analyses
         observed_cookie_names: Set[str] = set()
@@ -74,6 +75,7 @@ class StorageProfiler:
                             declared_match=matched_declared,
                         )
                     )
+                    logger.debug("Storage decision: name=%s classification=%s observed_days=%s declared=%s", cookie_name, StorageClassificationType.EXCESSIVE_LIFESPAN.value, observed_days, matched_declared.name)
                 else:
                     results.append(
                         StorageClassificationResult(
@@ -85,6 +87,7 @@ class StorageProfiler:
                             declared_match=matched_declared,
                         )
                     )
+                    logger.debug("Storage decision: name=%s classification=%s observed_days=%s declared=%s", cookie_name, StorageClassificationType.DOCUMENTED.value, observed_days, matched_declared.name)
             else:
                 results.append(
                     StorageClassificationResult(
@@ -99,5 +102,7 @@ class StorageProfiler:
                         declared_match=None,
                     )
                 )
+                logger.debug("Storage decision: name=%s classification=%s observed_days=%s declared=None", cookie_name, StorageClassificationType.UNDOCUMENTED.value, observed_days)
 
+        logger.debug("Storage profiling complete: results=%d", len(results))
         return results

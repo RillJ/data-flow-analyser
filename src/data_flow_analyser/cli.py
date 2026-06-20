@@ -1,5 +1,6 @@
 """Command-line interface for the Data Flow Analyser."""
 
+import json
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -15,6 +16,24 @@ from data_flow_analyser.pipeline import AuditPipeline
 
 app = typer.Typer(help="Data Flow Analyser command-line interface.")
 console = Console()
+logger = logging.getLogger(__name__)
+
+
+def configure_logging(verbose: bool, log_file: Optional[Path] = None) -> None:
+    """Configure console and optional file diagnostics for one CLI invocation."""
+    level = logging.DEBUG if verbose else logging.WARNING
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S%z",
+        handlers=handlers,
+        force=True,
+    )
 
 
 def version_callback(value: bool) -> None:
@@ -65,6 +84,16 @@ def audit(
         dir_okay=False,
         readable=True,
     ),
+    seed_json: Optional[Path] = typer.Option(
+        None,
+        "--seed-file",
+        "-s",
+        help="Path to JSON file containing seed key-value pairs (e.g. {\"email\": \"user@test.com\"}).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
     out_json: Optional[Path] = typer.Option(
         None,
         "--out-json",
@@ -94,14 +123,18 @@ def audit(
         False,
         "--verbose",
         "-v",
-        help="Enable debug logging output.",
+        help="Show detailed intermediary pipeline diagnostics.",
+    ),
+    log_file: Optional[Path] = typer.Option(
+        None,
+        "--log-file",
+        help="Write diagnostics to this file (use with --verbose for a full trace).",
     ),
 ) -> None:
     """Run an end-to-end technical privacy cross-reference audit."""
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.WARNING)
+    configure_logging(verbose, log_file)
+    if log_file:
+        logger.info("Logging to %s (verbose=%s)", log_file, verbose)
 
     with console.status("[bold green]Executing privacy audit pipeline...", spinner="dots"):
         pipeline = AuditPipeline(
@@ -110,9 +143,14 @@ def audit(
             api_base=api_base,
         )
 
+        seed_data = None
+        if seed_json:
+            seed_data = json.loads(seed_json.read_text(encoding="utf-8"))
+
         report = pipeline.run(
             flow_file_path=flows,
             documents=doc,
+            seed_data=seed_data,
         )
 
     markdown_str = ReportExporter.to_markdown(report)

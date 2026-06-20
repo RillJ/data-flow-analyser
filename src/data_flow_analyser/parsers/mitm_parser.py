@@ -29,6 +29,7 @@ def parse_flow_file(file_path: str) -> List[NetworkFlow]:
         return []
 
     parsed_flows: List[NetworkFlow] = []
+    logger.debug("Flow parsing started: path=%s", path)
     try:
         with path.open("rb") as flow_file:
             reader = FlowReader(flow_file)
@@ -46,6 +47,7 @@ def parse_flow_file(file_path: str) -> List[NetworkFlow]:
     except Exception as error:
         logger.warning("Unable to parse mitmproxy flow file %s: %s", path, error)
 
+    logger.debug("Flow parsing complete: path=%s http_flows=%d", path, len(parsed_flows))
     return parsed_flows
 
 
@@ -56,7 +58,7 @@ def _to_network_flow(flow: HTTPFlow) -> NetworkFlow:
     url = request.pretty_url
     url_parts = urlsplit(url)
 
-    return NetworkFlow(
+    network_flow = NetworkFlow(
         flow_id=str(uuid4()),
         timestamp=datetime.fromtimestamp(request.timestamp_start, tz=timezone.utc),
         method=request.method,
@@ -73,6 +75,8 @@ def _to_network_flow(flow: HTTPFlow) -> NetworkFlow:
             response.headers.get_all("set-cookie") if response is not None else []
         ),
     )
+    logger.debug("HTTP flow converted: host=%s method=%s path=%s request_body_chars=%d response_status=%s cookies_sent=%d cookies_set=%d", network_flow.host, network_flow.method, network_flow.path, len(network_flow.request_body or ""), network_flow.response_status, len(network_flow.cookies_sent), len(network_flow.cookies_set))
+    return network_flow
 
 
 def _headers_to_dict(headers: Any) -> Dict[str, str]:
@@ -93,6 +97,7 @@ def _decode_body(body: Optional[str]) -> Optional[str]:
         return None
 
     decoded = recursive_decode(body)
+    logger.debug("HTTP body decoded: input_chars=%d output_type=%s", len(body), type(decoded).__name__)
     if isinstance(decoded, (dict, list)):
         return json.dumps(decoded, ensure_ascii=False, sort_keys=True)
     return str(decoded)

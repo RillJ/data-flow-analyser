@@ -6,7 +6,7 @@ from data_flow_analyser.engines.entropy import (
     calculate_shannon_entropy,
     parse_set_cookie_longevity,
     extract_high_entropy_tokens,
-    analyze_flow_identifiers,
+    analyse_flow_identifiers,
 )
 
 __all__ = [
@@ -17,5 +17,5 @@ __all__ = [
     "calculate_shannon_entropy",
     "parse_set_cookie_longevity",
     "extract_high_entropy_tokens",
-    "analyze_flow_identifiers",
+    "analyse_flow_identifiers",
 ]

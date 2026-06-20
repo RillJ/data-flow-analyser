@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import math
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from data_flow_analyser.models.schemas import (
@@ -11,6 +12,7 @@ from data_flow_analyser.models.schemas import (
 
 # Standard duration threshold: 90 days in seconds
 NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60  # 7,776,000 seconds
+logger = logging.getLogger(__name__)
 
 
 def calculate_shannon_entropy(text: str) -> float:
@@ -92,6 +94,7 @@ def parse_set_cookie_longevity(
     is_excessive = False
     if max_age_seconds is not None and max_age_seconds > NINETY_DAYS_SECONDS:
         is_excessive = True
+    logger.debug("Cookie longevity: name=%s lifespan_days=%s excessive=%s", cookie_name, lifespan_days, is_excessive)
 
     results.append(
         CookieLongevityResult(
@@ -145,10 +148,12 @@ def extract_high_entropy_tokens(
                 )
             )
 
+    if tokens:
+        logger.debug("High-entropy scan: location=%s tokens=%d", parent_key, len(tokens))
     return tokens
 
 
-def analyze_flow_identifiers(
+def analyse_flow_identifiers(
     flow: NetworkFlow,
     entropy_threshold: float = 3.5,
     min_length: int = 8
@@ -189,4 +194,5 @@ def analyze_flow_identifiers(
             )
         )
 
+    logger.debug("Identifier analysis complete: flow_id=%s tokens=%d cookies=%d", flow.flow_id, len(high_entropy_tokens), len(cookie_longevity_results))
     return high_entropy_tokens, cookie_longevity_results

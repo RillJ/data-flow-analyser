@@ -1,5 +1,6 @@
 import ipaddress
 import json
+import logging
 from pathlib import Path
 import socket
 from typing import Any, Dict, Optional, Tuple
@@ -14,6 +15,8 @@ EU_EEA_COUNTRIES = {
     "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
     "PL", "PT", "RO", "SK", "SI", "ES", "SE", "NO", "IS", "LI"
 }
+
+logger = logging.getLogger(__name__)
 
 
 class DDGTrackerRadar:
@@ -58,11 +61,13 @@ class DDGTrackerRadar:
         """
         domain_clean = domain.lower().strip()
         if domain_clean in self.radar_data:
+            logger.debug("Tracker Radar cache hit: domain=%s", domain_clean)
             return self.radar_data[domain_clean]
 
         url = f"{self.GITHUB_RAW_BASE}/domains/{region}/{domain_clean}.json"
         
         try:
+            logger.debug("Tracker Radar lookup: domain=%s region=%s", domain_clean, region)
             req = urllib.request.Request(
                 url, 
                 headers={"User-Agent": "DataFlowAnalyser/1.0 (Academic Research)"}
@@ -71,9 +76,15 @@ class DDGTrackerRadar:
                 if response.status == 200:
                     data = json.loads(response.read().decode("utf-8"))
                     self.radar_data[domain_clean] = data
+                    logger.debug(
+                        "Tracker Radar result: domain=%s owner=%s categories=%s",
+                        domain_clean,
+                        data.get("owner", {}).get("name") if isinstance(data.get("owner"), dict) else data.get("entity"),
+                        data.get("categories") or data.get("category"),
+                    )
                     return data
-        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
-            pass
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as error:
+            logger.debug("Tracker Radar lookup failed: domain=%s error=%s", domain_clean, error)
 
         return None
 
@@ -106,6 +117,7 @@ class DDGTrackerRadar:
         # Walk down domain hierarchy: sub.ad.doubleclick.net > ad.doubleclick.net -> doubleclick.net
         for i in range(len(parts) - 1):
             sub_domain = ".".join(parts[i:])
+            logger.debug("Tracker Radar suffix candidate: input=%s candidate=%s", clean_domain, sub_domain)
             
             meta = self.get_tracker_metadata(sub_domain, auto_fetch=auto_fetch)
             if meta:
@@ -124,8 +136,13 @@ class DDGTrackerRadar:
                 elif isinstance(meta.get("category"), str):
                     category = meta["category"]
 
+                logger.debug(
+                    "Tracker Radar matched: input=%s matched_domain=%s entity=%s category=%s",
+                    clean_domain, sub_domain, entity, category,
+                )
                 return entity, category
 
+        logger.debug("Tracker Radar no match: domain=%s", clean_domain)
         return None, "unknown"
 
 
@@ -147,6 +164,7 @@ class EndpointProfiler:
     def resolve_reverse_dns(self, ip_address: str) -> Optional[str]:
         """Performs PTR record lookup for an IP address with caching."""
         if ip_address in self._dns_cache:
+            logger.debug("Reverse DNS cache hit: ip=%s hostname=%s", ip_address, self._dns_cache[ip_address])
             return self._dns_cache[ip_address]
 
         try:
@@ -154,19 +172,23 @@ class EndpointProfiler:
             if ip_obj.is_private or ip_obj.is_loopback:
                 res = "localhost" if ip_obj.is_loopback else "local_network"
                 self._dns_cache[ip_address] = res
+                logger.debug("Reverse DNS local address: ip=%s hostname=%s", ip_address, res)
                 return res
 
             hostname, _, _ = socket.gethostbyaddr(ip_address)
             self._dns_cache[ip_address] = hostname
+            logger.debug("Reverse DNS result: ip=%s hostname=%s", ip_address, hostname)
             return hostname
-        except Exception:
+        except Exception as error:
             self._dns_cache[ip_address] = None
+            logger.debug("Reverse DNS failed: ip=%s error=%s", ip_address, error)
             return None
 
 
     def lookup_ip_geolocation(self, ip_address: str) -> Dict[str, Any]:
         """Looks up country code and ASN organization for an IP address."""
         if ip_address in self._geoip_cache:
+            logger.debug("GeoIP cache hit: ip=%s result=%s", ip_address, self._geoip_cache[ip_address])
             return self._geoip_cache[ip_address]
 
         default_result = {"country_code": None, "asn_org": None, "is_private": False}
@@ -176,6 +198,7 @@ class EndpointProfiler:
             if ip_obj.is_private or ip_obj.is_loopback:
                 default_result.update({"country_code": "LOCAL", "asn_org": "Private Network", "is_private": True})
                 self._geoip_cache[ip_address] = default_result
+                logger.debug("GeoIP local address: ip=%s result=%s", ip_address, default_result)
                 return default_result
 
             url = f"http://ip-api.com/json/{ip_address}?fields=status,countryCode,org,as"
@@ -191,11 +214,13 @@ class EndpointProfiler:
                             "is_private": False
                         }
                         self._geoip_cache[ip_address] = res
+                        logger.debug("GeoIP result: ip=%s result=%s", ip_address, res)
                         return res
-        except Exception:
-            pass
+        except Exception as error:
+            logger.debug("GeoIP lookup failed: ip=%s error=%s", ip_address, error)
 
         self._geoip_cache[ip_address] = default_result
+        logger.debug("GeoIP fallback result: ip=%s result=%s", ip_address, default_result)
         return default_result
 
 
@@ -222,13 +247,15 @@ class EndpointProfiler:
             geo_info = self.lookup_ip_geolocation(ip_address)
             country_code = geo_info.get("country_code")
             asn_org = geo_info.get("asn_org")
+        else:
+            logger.debug("Endpoint profiling: no IP supplied, skipping reverse DNS and GeoIP: domain=%s", domain)
 
         is_third_country = False
         if country_code and country_code not in ("LOCAL", None):
             if base_location in EU_EEA_COUNTRIES and country_code not in EU_EEA_COUNTRIES:
                 is_third_country = True
 
-        return ObservedEndpoint(
+        endpoint = ObservedEndpoint(
             domain=domain,
             ip_address=ip_address,
             reverse_dns=reverse_dns,
@@ -239,3 +266,6 @@ class EndpointProfiler:
             is_third_country_transfer=is_third_country,
             is_undocumented=False,
         )
+
+        logger.debug("Endpoint profiler final result: %s", endpoint.model_dump())
+        return endpoint

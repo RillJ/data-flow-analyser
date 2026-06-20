@@ -1,8 +1,11 @@
 import base64
 import hashlib
+import logging
 from typing import Any, Dict, List, Tuple
 
 from data_flow_analyser.models.schemas import SeedData
+
+logger = logging.getLogger(__name__)
 
 
 def generate_seed_hash_map(raw_seeds: Dict[str, str]) -> SeedData:
@@ -16,9 +19,11 @@ def generate_seed_hash_map(raw_seeds: Dict[str, str]) -> SeedData:
         SeedData model containing raw values and the generated lookup map.
     """
     hash_map: Dict[str, str] = {}
+    logger.debug("Generating seed lookup map: labels=%d", len(raw_seeds))
 
     for label, raw_val in raw_seeds.items():
         if not raw_val or not isinstance(raw_val, str):
+            logger.debug("Skipping invalid seed: label=%s", label)
             continue
 
         trimmed = raw_val.strip()
@@ -53,7 +58,9 @@ def generate_seed_hash_map(raw_seeds: Dict[str, str]) -> SeedData:
             b64_str = base64.b64encode(val_bytes).decode("utf-8")
             hash_map[b64_str] = f"{label} (Base64)"
 
-    return SeedData(raw_values=raw_seeds, hash_map=hash_map)
+    result = SeedData(raw_values=raw_seeds, hash_map=hash_map)
+    logger.debug("Seed lookup map generated: valid_seeds=%d lookup_entries=%d", len(result.raw_values), len(hash_map))
+    return result
 
 
 def scan_for_seed_matches(payload: Any, seed_data: SeedData) -> List[Tuple[str, str]]:
@@ -83,4 +90,6 @@ def scan_for_seed_matches(payload: Any, seed_data: SeedData) -> List[Tuple[str, 
             if len(token) >= 4 and token in payload:
                 matches.append((token, label))
 
+    if matches:
+        logger.debug("Seed scan found matches: payload_type=%s matches=%d", type(payload).__name__, len(matches))
     return matches
