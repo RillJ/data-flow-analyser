@@ -97,7 +97,7 @@ class PolicyDocumentIngestor:
         try:
             user_prompt = (
                 f"Document Title: {document_title}\n\n"
-                f"Document Text:\n{text_content[:25000]}"
+                f"Document Text:\n{text_content}"
             )
             logger.debug(
                 "LLM request (document_ingestor) BEGIN: model=%s messages=2 response_format=json_object",

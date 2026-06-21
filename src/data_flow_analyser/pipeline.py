@@ -183,7 +183,11 @@ class AuditPipeline:
             if host and host not in seen_hosts:
                 seen_hosts.add(host)
                 logger.debug("Profiling endpoint %d: host=%s", len(seen_hosts), host)
-                profiled = self.endpoint_profiler.profile_endpoint(domain=host)
+                resolved_ip = self.endpoint_profiler.resolve_domain_ip(host)
+                profiled = self.endpoint_profiler.profile_endpoint(
+                    domain=host,
+                    ip_address=resolved_ip,
+                )
                 endpoints.append(profiled)
 
         return endpoints

@@ -159,6 +159,31 @@ class EndpointProfiler:
         self.tracker_radar = tracker_radar or DDGTrackerRadar()
         self._dns_cache: Dict[str, Optional[str]] = {}
         self._geoip_cache: Dict[str, Dict[str, Any]] = {}
+        self._domain_ip_cache: Dict[str, Optional[str]] = {}
+
+    def resolve_domain_ip(self, domain: str) -> Optional[str]:
+        """Resolve a domain to a representative address for IP enrichment."""
+        domain_clean = domain.strip().lower()
+        if domain_clean in self._domain_ip_cache:
+            logger.debug("Domain resolution cache hit: domain=%s ip=%s", domain_clean, self._domain_ip_cache[domain_clean])
+            return self._domain_ip_cache[domain_clean]
+
+        try:
+            addresses = socket.getaddrinfo(domain_clean, 443, type=socket.SOCK_STREAM)
+            candidates: list[str] = []
+            for item in addresses:
+                sockaddr = item[4]
+                if isinstance(sockaddr, tuple) and sockaddr and isinstance(sockaddr[0], str):
+                    candidates.append(sockaddr[0])
+            # Prefer IPv4 because the configured GeoIP provider handles it most consistently.
+            ip_address = next((ip for ip in candidates if "." in ip), candidates[0] if candidates else None)
+            self._domain_ip_cache[domain_clean] = ip_address
+            logger.debug("Domain resolution result: domain=%s ip=%s candidates=%d", domain_clean, ip_address, len(candidates))
+            return ip_address
+        except (OSError, socket.gaierror) as error:
+            self._domain_ip_cache[domain_clean] = None
+            logger.debug("Domain resolution failed: domain=%s error=%s", domain_clean, error)
+            return None
 
 
     def resolve_reverse_dns(self, ip_address: str) -> Optional[str]:
@@ -229,7 +254,8 @@ class EndpointProfiler:
         domain: str,
         ip_address: Optional[str] = None,
         base_location: str = "NL",
-        auto_fetch_tracker: bool = True
+        auto_fetch_tracker: bool = True,
+        resolve_domain: bool = False,
     ) -> ObservedEndpoint:
         """
         Combines Tracker Radar, Reverse DNS, and GeoIP lookups to build an ObservedEndpoint.
@@ -242,13 +268,16 @@ class EndpointProfiler:
         country_code = None
         asn_org = None
 
+        if not ip_address and resolve_domain:
+            ip_address = self.resolve_domain_ip(domain)
+
         if ip_address:
             reverse_dns = self.resolve_reverse_dns(ip_address)
             geo_info = self.lookup_ip_geolocation(ip_address)
             country_code = geo_info.get("country_code")
             asn_org = geo_info.get("asn_org")
         else:
-            logger.debug("Endpoint profiling: no IP supplied, skipping reverse DNS and GeoIP: domain=%s", domain)
+            logger.debug("Endpoint profiling: no resolvable IP, skipping reverse DNS and GeoIP: domain=%s", domain)
 
         is_third_country = False
         if country_code and country_code not in ("LOCAL", None):
