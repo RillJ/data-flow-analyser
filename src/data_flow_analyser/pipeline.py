@@ -1,10 +1,12 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.engines.document_ingestor import PolicyDocumentIngestor
 from data_flow_analyser.engines.endpoint_profiler import EndpointProfiler
+from data_flow_analyser.engines.fingerprint_profiler import FingerprintProfiler
 from data_flow_analyser.engines.entropy import (
     analyse_flow_identifiers,
 )
@@ -14,6 +16,8 @@ from data_flow_analyser.engines.seed_hasher import (
 )
 from data_flow_analyser.models.schemas import (
     CookieLongevityResult,
+    FingerprintPersistenceFinding,
+    FingerprintVector,
     FullAuditReport,
     NetworkFlow,
     ObservedEndpoint,
@@ -45,12 +49,15 @@ class AuditPipeline:
             model=llm_model, api_key=api_key, api_base=api_base
         )
         self.endpoint_profiler = EndpointProfiler()
+        self.fingerprint_profiler = FingerprintProfiler()
 
     def run(
         self,
         flow_file_path: Optional[Union[str, Path]] = None,
         documents: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         seed_data: Optional[Union[SeedData, Dict[str, str]]] = None,
+        consent_granted_at: Optional[datetime] = None,
+        consent_withdrawn_at: Optional[datetime] = None,
     ) -> FullAuditReport:
         """
         Executes the full end-to-end privacy audit pipeline.
@@ -59,6 +66,8 @@ class AuditPipeline:
             flow_file_path: Path to the mitmproxy capture dump file.
             documents: Single file path, text string, or sequence/list of file paths/texts.
             seed_data: User PII key-value pairs or pre-computed SeedData.
+            consent_granted_at: Optional timestamp at which the user gave consent.
+            consent_withdrawn_at: Optional timestamp at which the user withdrew consent.
 
         Returns:
             FullAuditReport containing endpoint classifications and discrepancy cards.
@@ -70,6 +79,7 @@ class AuditPipeline:
         target_docs = documents
         if not target_docs:
             raise ValueError("Must provide at least one document or text input.")
+        self._validate_consent_timeline(consent_granted_at, consent_withdrawn_at)
 
         path_str = str(target_flow_path)
         logger.info(f"Loading and parsing mitmproxy flow capture file: {path_str}")
@@ -121,6 +131,19 @@ class AuditPipeline:
             f"and {len(cookie_results)} set-cookie longevity records."
         )
 
+        fingerprint_vectors: List[FingerprintVector]
+        fingerprint_findings: List[FingerprintPersistenceFinding]
+        fingerprint_vectors, fingerprint_findings = self.fingerprint_profiler.analyse_flows(
+            flows,
+            consent_granted_at=consent_granted_at,
+            consent_withdrawn_at=consent_withdrawn_at,
+        )
+        candidate_count = sum(vector.is_candidate for vector in fingerprint_vectors)
+        logger.info(
+            "Extracted %d fingerprint candidate vectors and %d consent-phase findings.",
+            candidate_count, len(fingerprint_findings),
+        )
+
         # Ingest disclosure document(s)
         combined_text, auto_title = self._aggregate_documents(target_docs)
         logger.info(f"Analysing documentation: '{auto_title}' ({len(combined_text)} chars)")
@@ -139,10 +162,26 @@ class AuditPipeline:
             seed_matches=seed_matches,
             entropy_tokens=entropy_tokens,
             cookie_results=cookie_results,
+            fingerprint_vectors=fingerprint_vectors,
+            fingerprint_persistence_findings=fingerprint_findings,
         )
 
         logger.info(f"Audit completed. Found {report.total_discrepancies_found} discrepancies.")
         return report
+
+    @staticmethod
+    def _validate_consent_timeline(
+        consent_granted_at: Optional[datetime], consent_withdrawn_at: Optional[datetime]
+    ) -> None:
+        """Ensure optional consent events are timezone-aware and chronologically valid."""
+        for name, timestamp in (
+            ("consent_granted_at", consent_granted_at),
+            ("consent_withdrawn_at", consent_withdrawn_at),
+        ):
+            if timestamp and timestamp.tzinfo is None:
+                raise ValueError(f"{name} must include a timezone offset.")
+        if consent_granted_at and consent_withdrawn_at and consent_withdrawn_at < consent_granted_at:
+            raise ValueError("consent_withdrawn_at must be after consent_granted_at.")
 
     def _aggregate_documents(
         self, documents: Union[str, Path, Sequence[Union[str, Path]]]

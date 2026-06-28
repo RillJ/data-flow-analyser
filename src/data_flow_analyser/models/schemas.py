@@ -87,6 +87,53 @@ class TrackingToken(BaseModel):
     is_high_entropy: bool = True
 
 
+class ConsentPhase(str, Enum):
+    """Consent state inferred from user-supplied capture timestamps."""
+
+    UNKNOWN = "unknown"
+    PRE_CONSENT = "pre_consent"
+    CONSENTED = "consented"
+    WITHDRAWN = "withdrawn"
+
+
+class FingerprintAttribute(BaseModel):
+    """One request value mapped to a browser/device fingerprinting category."""
+
+    category: str
+    key: str
+    value: str
+    location: str
+
+
+class FingerprintVector(BaseModel):
+    """Candidate browser/device fingerprint vector observed in one network flow."""
+
+    flow_id: str
+    endpoint: str
+    consent_phase: ConsentPhase = ConsentPhase.UNKNOWN
+    matched_categories: List[str] = Field(default_factory=list)
+    attributes: List[FingerprintAttribute] = Field(default_factory=list)
+    payload_locations: List[str] = Field(default_factory=list)
+    attribute_count: int = 0
+    heuristic_score: float = 0.0
+    is_candidate: bool = False
+    signature: str
+    scoring_method: str = "attribute co-occurrence heuristic; no population-frequency baseline configured"
+
+
+class FingerprintPersistenceFinding(BaseModel):
+    """Cross-flow observation of an identical candidate vector across consent phases."""
+
+    endpoint: str
+    signature: str
+    observed_phases: List[ConsentPhase] = Field(default_factory=list)
+    flow_ids: List[str] = Field(default_factory=list)
+    observed_before_consent: bool = False
+    observed_after_withdrawal: bool = False
+    persists_after_withdrawal: bool = False
+    reasoning: str
+
+
 class CookieLongevityResult(BaseModel):
     """Represents cookie lifespan analysis from Set-Cookie headers."""
 
@@ -204,6 +251,8 @@ class DiscrepancyCategory(str, Enum):
     UNANNOUNCED_STORAGE = "unannounced_storage"
     UNSAFE_THIRD_COUNTRY_TRANSFER = "unsafe_third_country_transfer"
     PLAINTEXT_PERSONAL_DATA_LEAK = "plaintext_personal_data_leak"
+    FINGERPRINTING_CANDIDATE = "fingerprinting_candidate"
+    FINGERPRINTING_AFTER_WITHDRAWAL = "fingerprinting_after_withdrawal"
 
 
 class DiscrepancySeverity(str, Enum):
@@ -232,6 +281,8 @@ class FullAuditReport(BaseModel):
     summary: str
     endpoint_classifications: List[EndpointClassificationResult] = []
     storage_classifications: List[StorageClassificationResult] = []
+    fingerprint_vectors: List[FingerprintVector] = []
+    fingerprint_persistence_findings: List[FingerprintPersistenceFinding] = []
     discrepancies: List[ComplianceDiscrepancy] = []
     total_flows_analyzed: int = 0
     total_discrepancies_found: int = 0

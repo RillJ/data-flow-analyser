@@ -1,0 +1,67 @@
+from base64 import b64encode
+from datetime import datetime, timezone
+
+from data_flow_analyser.engines.fingerprint_profiler import (
+    FingerprintProfiler,
+    classify_consent_phase,
+)
+from data_flow_analyser.models.schemas import ConsentPhase, NetworkFlow
+
+
+def _flow(flow_id: str, timestamp: datetime) -> NetworkFlow:
+    payload = b64encode(
+        b'{"canvas_hash":"e7b92f1a","webgl_renderer":"ANGLE Apple"}'
+    ).decode()
+    return NetworkFlow(
+        flow_id=flow_id,
+        timestamp=timestamp,
+        method="POST",
+        url="https://tracker.example/collect?sw=1920&sh=1080&tz=-120",
+        host="tracker.example",
+        path="/collect",
+        request_headers={"User-Agent": "ExampleBrowser/1.0"},
+        request_body=payload,
+    )
+
+
+def test_fingerprint_profiler_combines_query_header_and_decoded_body_attributes():
+    profiler = FingerprintProfiler()
+    vector = profiler.analyse_flow(
+        _flow("flow-1", datetime(2026, 6, 27, 9, tzinfo=timezone.utc)),
+        ConsentPhase.PRE_CONSENT,
+    )
+
+    assert vector.is_candidate is True
+    assert set(vector.matched_categories) == {
+        "canvas", "display", "hardware_os", "locale_time", "webgl"
+    }
+    assert {attribute.location for attribute in vector.attributes} == {
+        "url_query", "request_headers", "request_body"
+    }
+    assert any(attribute.key.endswith("canvas_hash") for attribute in vector.attributes)
+
+
+def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
+    profiler = FingerprintProfiler()
+    granted_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
+    withdrawn_at = datetime(2026, 6, 27, 11, tzinfo=timezone.utc)
+    flows = [
+        _flow("flow-consented", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
+        _flow("flow-withdrawn", datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)),
+    ]
+
+    vectors, findings = profiler.analyse_flows(flows, granted_at, withdrawn_at)
+
+    assert len(vectors) == 2
+    assert len(findings) == 1
+    assert findings[0].observed_after_withdrawal is True
+    assert findings[0].persists_after_withdrawal is True
+    assert set(findings[0].observed_phases) == {
+        ConsentPhase.CONSENTED,
+        ConsentPhase.WITHDRAWN,
+    }
+
+
+def test_consent_phase_is_unknown_without_user_supplied_events():
+    timestamp = datetime(2026, 6, 27, tzinfo=timezone.utc)
+    assert classify_consent_phase(timestamp) == ConsentPhase.UNKNOWN

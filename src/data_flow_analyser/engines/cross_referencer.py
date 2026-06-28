@@ -13,6 +13,8 @@ from data_flow_analyser.models.schemas import (
     EndpointClassificationResult,
     EndpointClassificationType,
     FullAuditReport,
+    FingerprintPersistenceFinding,
+    FingerprintVector,
     NetworkFlow,
     ObservedEndpoint,
     StorageClassificationResult,
@@ -46,6 +48,9 @@ You must produce an auditable report evaluating:
    - Data collection exceeding stated categories (like: ACCOUNT_DATA sent to DIAGNOSTIC_DATA endpoints).
    - Cookies or LocalStorage keys observed but unannounced, or with actual lifespans exceeding declared durations.
    - International data transfers to third countries (like: US) without disclosed transfer safeguards.
+   - Candidate browser/device fingerprint vectors, especially those observed before consent or after withdrawal.
+
+Fingerprint vectors are technical candidates based on attribute co-occurrence, not proof of unique identification. Only treat a consent-phase finding as evidence when the supplied phase is explicit; do not infer missing consent states.
 
 For EVERY discrepancy, provide the exact technical evidence observed and cite the verbatim policy quote (or 'Not declared' if missing).
 
@@ -74,7 +79,7 @@ Respond strictly in JSON matching this schema:
     {
       "discrepancy_id": "DISC-001",
       "title": "Short descriptive title",
-      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|plaintext_personal_data_leak",
+      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|plaintext_personal_data_leak|fingerprinting_candidate|fingerprinting_after_withdrawal",
       "severity": "LOW|MEDIUM|HIGH|CRITICAL",
       "observed_evidence": "Factual description of wire observations",
       "declared_claim_quote": "Verbatim quote from policy or 'Not declared'",
@@ -110,6 +115,8 @@ class LLMCrossReferencer:
         seed_matches: Optional[List[Dict[str, Any]]] = None,
         entropy_tokens: Optional[List[TrackingToken]] = None,
         cookie_results: Optional[List[CookieLongevityResult]] = None,
+        fingerprint_vectors: Optional[List[FingerprintVector]] = None,
+        fingerprint_persistence_findings: Optional[List[FingerprintPersistenceFinding]] = None,
     ) -> FullAuditReport:
         """
         Executes an LLM-based technical cross-reference between observed evidence and policy claims.
@@ -117,7 +124,9 @@ class LLMCrossReferencer:
         seed_matches = seed_matches or []
         entropy_tokens = entropy_tokens or []
         cookie_results = cookie_results or []
-        logger.debug("Cross-reference started: flows=%d endpoints=%d seed_matches=%d tokens=%d cookie_records=%d", len(flows), len(endpoints), len(seed_matches), len(entropy_tokens), len(cookie_results))
+        fingerprint_vectors = fingerprint_vectors or []
+        fingerprint_persistence_findings = fingerprint_persistence_findings or []
+        logger.debug("Cross-reference started: flows=%d endpoints=%d seed_matches=%d tokens=%d cookie_records=%d fingerprint_vectors=%d phase_findings=%d", len(flows), len(endpoints), len(seed_matches), len(entropy_tokens), len(cookie_results), len(fingerprint_vectors), len(fingerprint_persistence_findings))
 
         # Run rule-based storage profiling first to reconcile observed storage against policy
         rule_based_storage_eval = self.storage_profiler.reconcile_storage(
@@ -133,8 +142,10 @@ class LLMCrossReferencer:
             entropy_tokens,
             cookie_results,
             rule_based_storage_eval,
+            fingerprint_vectors,
+            fingerprint_persistence_findings,
         )
-        logger.debug("Evidence summary prepared: endpoints=%d seed_leaks=%d entropy_tokens=%d storage_items=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_seed_leaks"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]))
+        logger.debug("Evidence summary prepared: endpoints=%d seed_leaks=%d entropy_tokens=%d storage_items=%d fingerprint_vectors=%d phase_findings=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_seed_leaks"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]), len(evidence_summary["fingerprint_vectors"]), len(evidence_summary["fingerprint_consent_phase_findings"]))
 
         document_context = doc_analysis.model_dump(mode="json")
 
@@ -189,6 +200,8 @@ class LLMCrossReferencer:
                     audit_title="Technical Audit (Failed)",
                     summary="Failed to get response choices from LLM.",
                     total_flows_analyzed=len(flows),
+                    fingerprint_vectors=fingerprint_vectors,
+                    fingerprint_persistence_findings=fingerprint_persistence_findings,
                 )
 
             raw_json_str: Optional[str] = response.choices[0].message.content
@@ -197,9 +210,13 @@ class LLMCrossReferencer:
                     audit_title="Technical Audit (Empty Response)",
                     summary="LLM returned empty output.",
                     total_flows_analyzed=len(flows),
+                    fingerprint_vectors=fingerprint_vectors,
+                    fingerprint_persistence_findings=fingerprint_persistence_findings,
                 )
 
             report = self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
+            report.fingerprint_vectors = fingerprint_vectors
+            report.fingerprint_persistence_findings = fingerprint_persistence_findings
             logger.debug("Cross-reference report parsed: endpoint_results=%d storage_results=%d discrepancies=%d", len(report.endpoint_classifications), len(report.storage_classifications), len(report.discrepancies))
             return report
 
@@ -210,6 +227,8 @@ class LLMCrossReferencer:
                 summary=f"Analysis encountered an execution error: {str(e)}",
                 storage_classifications=rule_based_storage_eval,
                 total_flows_analyzed=len(flows),
+                fingerprint_vectors=fingerprint_vectors,
+                fingerprint_persistence_findings=fingerprint_persistence_findings,
             )
 
     def _prepare_evidence_summary(
@@ -220,6 +239,8 @@ class LLMCrossReferencer:
         entropy_tokens: List[TrackingToken],
         cookie_results: List[CookieLongevityResult],
         storage_evaluations: List[StorageClassificationResult],
+        fingerprint_vectors: List[FingerprintVector],
+        fingerprint_persistence_findings: List[FingerprintPersistenceFinding],
     ) -> Dict[str, Any]:
         """Summarizes low-level network vectors into a clean structure for the prompt."""
         endpoint_summary = [
@@ -283,11 +304,31 @@ class LLMCrossReferencer:
             for item in storage_evaluations
         ]
 
+        fingerprint_summary = [
+            {
+                "flow_id": vector.flow_id,
+                "endpoint": vector.endpoint,
+                "consent_phase": vector.consent_phase.value,
+                "matched_categories": vector.matched_categories,
+                "attributes": [attribute.model_dump() for attribute in vector.attributes],
+                "payload_locations": vector.payload_locations,
+                "attribute_count": vector.attribute_count,
+                "heuristic_score": vector.heuristic_score,
+                "is_candidate": vector.is_candidate,
+                "scoring_method": vector.scoring_method,
+            }
+            for vector in fingerprint_vectors
+            if vector.is_candidate
+        ]
+        persistence_summary = [finding.model_dump(mode="json") for finding in fingerprint_persistence_findings]
+
         return {
             "observed_endpoints": endpoint_summary,
             "personal_data_seed_leaks": seed_summary,
             "high_entropy_tokens": entropy_summary,
             "observed_storage_evaluations": storage_summary,
+            "fingerprint_vectors": fingerprint_summary,
+            "fingerprint_consent_phase_findings": persistence_summary,
         }
 
     def _parse_audit_report(

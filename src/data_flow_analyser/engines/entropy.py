@@ -3,12 +3,14 @@ from email.utils import parsedate_to_datetime
 import math
 import logging
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qsl, urlsplit
 
 from data_flow_analyser.models.schemas import (
     CookieLongevityResult,
     NetworkFlow,
     TrackingToken,
 )
+from data_flow_analyser.parsers.decoder import recursive_decode
 
 # Standard duration threshold: 90 days in seconds
 NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60  # 7,776,000 seconds
@@ -176,6 +178,27 @@ def analyse_flow_identifiers(
             )
         )
 
+    # Inspect URL query parameters and request headers, which frequently carry IDs.
+    query_params = parse_qsl(urlsplit(flow.url).query, keep_blank_values=True)
+    if query_params:
+        high_entropy_tokens.extend(
+            extract_high_entropy_tokens(
+                {key: value for key, value in query_params},
+                parent_key="url_query",
+                min_length=min_length,
+                entropy_threshold=entropy_threshold,
+            )
+        )
+    if flow.request_headers:
+        high_entropy_tokens.extend(
+            extract_high_entropy_tokens(
+                flow.request_headers,
+                parent_key="request_headers",
+                min_length=min_length,
+                entropy_threshold=entropy_threshold,
+            )
+        )
+
     # Inspect Set-Cookie headers
     set_cookie_val = flow.response_headers.get("Set-Cookie") or flow.response_headers.get("set-cookie")
     if set_cookie_val:
@@ -185,9 +208,10 @@ def analyse_flow_identifiers(
 
     # Inspect request body
     if flow.request_body:
+        decoded_body = recursive_decode(flow.request_body)
         high_entropy_tokens.extend(
             extract_high_entropy_tokens(
-                flow.request_body,
+                decoded_body,
                 parent_key="request_body",
                 min_length=min_length,
                 entropy_threshold=entropy_threshold

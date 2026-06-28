@@ -52,6 +52,30 @@ class ReportExporter:
                 )
             md.append("\n")
 
+        md.append("## Browser and Device Fingerprinting Candidates\n")
+        if not report.fingerprint_vectors:
+            md.append("_No fingerprinting candidates detected by the attribute co-occurrence heuristic._\n")
+        else:
+            md.append("| Endpoint | Consent Phase | Categories | Score | Evidence Locations |")
+            md.append("| --- | --- | --- | --- | --- |")
+            for vector in report.fingerprint_vectors:
+                md.append(
+                    f"| `{vector.endpoint}` | {vector.consent_phase.value} | "
+                    f"{', '.join(vector.matched_categories)} | {vector.heuristic_score:.2f} | "
+                    f"{', '.join(vector.payload_locations)} |"
+                )
+            md.append("\n")
+
+        md.append("## Fingerprinting Consent-Phase Findings\n")
+        if not report.fingerprint_persistence_findings:
+            md.append("_No candidate vectors were observed in pre-consent or withdrawn phases._\n")
+        else:
+            for finding in report.fingerprint_persistence_findings:
+                md.append(f"- **`{finding.endpoint}`** — {finding.reasoning}")
+                md.append(f"  - Phases: {', '.join(phase.value for phase in finding.observed_phases)}")
+                md.append(f"  - Flows: {', '.join(finding.flow_ids)}")
+            md.append("")
+
         md.append("## Detected Compliance Discrepancies\n")
         if not report.discrepancies:
             md.append("_No discrepancies detected between observed traffic and policy claims._\n")

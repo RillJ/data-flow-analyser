@@ -2,6 +2,7 @@
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -34,6 +35,25 @@ def configure_logging(verbose: bool, log_file: Optional[Path] = None) -> None:
         handlers=handlers,
         force=True,
     )
+
+
+def parse_iso8601_timestamp(value: Optional[str], option_name: str) -> Optional[datetime]:
+    """Parse a timezone-aware consent timestamp supplied to the CLI."""
+    if value is None:
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise typer.BadParameter(
+            "must be an ISO-8601 timestamp, for example 2026-08-13T10:15:00+02:00",
+            param_hint=option_name,
+        ) from error
+    if timestamp.tzinfo is None:
+        raise typer.BadParameter(
+            "must include a timezone offset, for example +02:00 or Z",
+            param_hint=option_name,
+        )
+    return timestamp
 
 
 def version_callback(value: bool) -> None:
@@ -119,6 +139,16 @@ def audit(
         "--api-base",
         help="Custom API base URL for LiteLLM (optional).",
     ),
+    consent_granted_at: Optional[str] = typer.Option(
+        None,
+        "--consent-granted-at",
+        help="ISO-8601 timestamp when consent was granted (for example 2026-08-13T10:15:00+02:00).",
+    ),
+    consent_withdrawn_at: Optional[str] = typer.Option(
+        None,
+        "--consent-withdrawn-at",
+        help="ISO-8601 timestamp when consent was withdrawn (for example 2026-08-13T10:40:00+02:00).",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -136,6 +166,14 @@ def audit(
     if log_file:
         logger.info("Logging to %s (verbose=%s)", log_file, verbose)
 
+    granted_at = parse_iso8601_timestamp(consent_granted_at, "--consent-granted-at")
+    withdrawn_at = parse_iso8601_timestamp(consent_withdrawn_at, "--consent-withdrawn-at")
+    if granted_at and withdrawn_at and withdrawn_at < granted_at:
+        raise typer.BadParameter(
+            "must be after --consent-granted-at",
+            param_hint="--consent-withdrawn-at",
+        )
+
     with console.status("[bold green]Executing privacy audit pipeline...", spinner="dots"):
         pipeline = AuditPipeline(
             llm_model=model,
@@ -151,6 +189,8 @@ def audit(
             flow_file_path=flows,
             documents=doc,
             seed_data=seed_data,
+            consent_granted_at=granted_at,
+            consent_withdrawn_at=withdrawn_at,
         )
 
     markdown_str = ReportExporter.to_markdown(report)
