@@ -104,7 +104,7 @@ class FingerprintProfiler:
             "Fingerprint profiling complete: vectors=%d candidates=%d persistence_findings=%d",
             len(vectors), len(candidates), len(findings),
         )
-        return candidates, findings
+        return vectors, findings
 
     def analyse_flow(self, flow: NetworkFlow, consent_phase: ConsentPhase) -> FingerprintVector:
         """Analyse one flow's query, selected headers, and recursively decoded body."""

@@ -32,7 +32,7 @@ Optional seed values can be supplied through a JSON file. For each seed, the ana
 
 The seed values are useful for controlled privacy-testing scenarios. For example, a test email address or account identifier entered during a browser interaction. Raw matched values should be treated as sensitive evidence.
 
-The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Entropy is a heuristic, meaning a high score does not prove that a value is personal data or a tracker.
+The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Generic HTTP negotiation headers such as `Accept` and `Accept-Language` are excluded because their values can score highly without being identifiers. Repeated findings are aggregated with occurrence counts. Entropy is a heuristic, meaning a high score does not prove that a value is personal data or a tracker.
 
 ### Endpoint profiling
 

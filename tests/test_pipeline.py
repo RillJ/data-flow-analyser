@@ -103,7 +103,6 @@ def test_pipeline_execution(
                             "severity": "HIGH",
                             "observed_evidence": "Transmitted user email to api.mixpanel.com",
                             "declared_claim_quote": "Not declared",
-                            "remediation_recommendation": "Disclose Mixpanel in DPA",
                         }
                     ],
                 })

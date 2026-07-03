@@ -30,6 +30,13 @@ from data_flow_analyser.parsers.decoder import recursive_decode
 NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60  # 7,776,000 seconds
 logger = logging.getLogger(__name__)
 
+IDENTIFIER_HEADER_NAMES = {
+    "authorization", "cookie", "proxy-authorization", "x-api-key",
+    "x-client-id", "x-device-id", "x-request-id", "x-session-id",
+    "x-trace-id", "traceparent", "tracestate",
+}
+IDENTIFIER_HEADER_HINTS = ("id", "token", "session", "visitor", "device", "client", "trace")
+
 
 def calculate_shannon_entropy(text: str) -> float:
     """
@@ -203,10 +210,16 @@ def analyse_flow_identifiers(
                 entropy_threshold=entropy_threshold,
             )
         )
-    if flow.request_headers:
+    identifier_headers = {
+        key: value
+        for key, value in flow.request_headers.items()
+        if key.lower() in IDENTIFIER_HEADER_NAMES
+        or any(hint in key.lower() for hint in IDENTIFIER_HEADER_HINTS)
+    }
+    if identifier_headers:
         high_entropy_tokens.extend(
             extract_high_entropy_tokens(
-                flow.request_headers,
+                identifier_headers,
                 parent_key="request_headers",
                 min_length=min_length,
                 entropy_threshold=entropy_threshold,

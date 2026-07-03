@@ -97,6 +97,16 @@ class TrackingToken(BaseModel):
     location: str  # example: "cookies_sent.session_id", "request_body.meta.visitor_id"
     entropy: float
     is_high_entropy: bool = True
+    occurrences: int = 1
+
+
+class SeedMatchEvidence(BaseModel):
+    """A controlled-value match found in captured traffic."""
+
+    matched_value: str
+    field_type: str
+    location: str
+    host: Optional[str] = None
 
 
 class ConsentPhase(str, Enum):
@@ -144,6 +154,19 @@ class FingerprintPersistenceFinding(BaseModel):
     observed_after_withdrawal: bool = False
     persists_after_withdrawal: bool = False
     reasoning: str
+
+
+class FingerprintAnalysisSummary(BaseModel):
+    """Aggregate statistics for the fingerprint profiler."""
+
+    total_vectors: int = 0
+    candidate_vectors: int = 0
+    categories_observed: Dict[str, int] = Field(default_factory=dict)
+    consent_phases: Dict[str, int] = Field(default_factory=dict)
+    persistence_findings: int = 0
+    maximum_heuristic_score: float = 0.0
+    candidate_rule: str = "4+ categories, or a canvas/audio/WebGL category plus another category"
+    scoring_method: str = "attribute co-occurrence heuristic; no population-frequency baseline configured"
 
 
 class CookieLongevityResult(BaseModel):
@@ -283,7 +306,6 @@ class ComplianceDiscrepancy(BaseModel):
     severity: DiscrepancySeverity
     observed_evidence: str  # example: "Plaintext email sent to api.mixpanel.com (US, IP 142.250.179.196)"
     declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "Not declared"
-    remediation_recommendation: str
 
 
 class FullAuditReport(BaseModel):
@@ -295,6 +317,11 @@ class FullAuditReport(BaseModel):
     storage_classifications: List[StorageClassificationResult] = []
     fingerprint_vectors: List[FingerprintVector] = []
     fingerprint_persistence_findings: List[FingerprintPersistenceFinding] = []
+    fingerprint_summary: FingerprintAnalysisSummary = Field(default_factory=FingerprintAnalysisSummary)
+    observed_endpoints: List[ObservedEndpoint] = []
+    tracking_tokens: List[TrackingToken] = []
+    cookie_longevity_results: List[CookieLongevityResult] = []
+    seed_matches: List[SeedMatchEvidence] = []
     discrepancies: List[ComplianceDiscrepancy] = []
     total_flows_analyzed: int = 0
     total_discrepancies_found: int = 0

@@ -29,6 +29,8 @@ from data_flow_analyser.models.schemas import (
     FullAuditReport,
     FingerprintPersistenceFinding,
     FingerprintVector,
+    FingerprintAnalysisSummary,
+    SeedMatchEvidence,
     NetworkFlow,
     ObservedEndpoint,
     StorageClassificationResult,
@@ -96,8 +98,7 @@ Respond strictly in JSON matching this schema:
       "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|plaintext_personal_data_leak|fingerprinting_candidate|fingerprinting_after_withdrawal",
       "severity": "LOW|MEDIUM|HIGH|CRITICAL",
       "observed_evidence": "Factual description of wire observations",
-      "declared_claim_quote": "Verbatim quote from policy or 'Not declared'",
-      "remediation_recommendation": "Actionable technical step to reconcile documentation with reality"
+      "declared_claim_quote": "Verbatim quote from policy or 'Not declared'"
     }
   ]
 }
@@ -131,6 +132,7 @@ class LLMCrossReferencer:
         cookie_results: Optional[List[CookieLongevityResult]] = None,
         fingerprint_vectors: Optional[List[FingerprintVector]] = None,
         fingerprint_persistence_findings: Optional[List[FingerprintPersistenceFinding]] = None,
+        fingerprint_summary: Optional[FingerprintAnalysisSummary] = None,
     ) -> FullAuditReport:
         """
         Executes an LLM-based technical cross-reference between observed evidence and policy claims.
@@ -140,6 +142,7 @@ class LLMCrossReferencer:
         cookie_results = cookie_results or []
         fingerprint_vectors = fingerprint_vectors or []
         fingerprint_persistence_findings = fingerprint_persistence_findings or []
+        fingerprint_summary = fingerprint_summary or FingerprintAnalysisSummary()
         logger.debug("Cross-reference started: flows=%d endpoints=%d seed_matches=%d tokens=%d cookie_records=%d fingerprint_vectors=%d phase_findings=%d", len(flows), len(endpoints), len(seed_matches), len(entropy_tokens), len(cookie_results), len(fingerprint_vectors), len(fingerprint_persistence_findings))
 
         # Run rule-based storage profiling first to reconcile observed storage against policy
@@ -231,6 +234,11 @@ class LLMCrossReferencer:
             report = self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
             report.fingerprint_vectors = fingerprint_vectors
             report.fingerprint_persistence_findings = fingerprint_persistence_findings
+            report.fingerprint_summary = fingerprint_summary
+            report.observed_endpoints = endpoints
+            report.tracking_tokens = entropy_tokens
+            report.cookie_longevity_results = cookie_results
+            report.seed_matches = [SeedMatchEvidence(**match) for match in seed_matches]
             logger.debug("Cross-reference report parsed: endpoint_results=%d storage_results=%d discrepancies=%d", len(report.endpoint_classifications), len(report.storage_classifications), len(report.discrepancies))
             return report
 
@@ -303,6 +311,7 @@ class LLMCrossReferencer:
                 "token": tok.token[:16] + "..." if len(tok.token) > 16 else tok.token,
                 "location": tok.location,
                 "entropy": tok.entropy,
+                "occurrences": tok.occurrences,
             }
             for tok in entropy_tokens
         ]
@@ -424,7 +433,6 @@ class LLMCrossReferencer:
                         severity=sev,
                         observed_evidence=disc.get("observed_evidence", ""),
                         declared_claim_quote=disc.get("declared_claim_quote"),
-                        remediation_recommendation=disc.get("remediation_recommendation", ""),
                     )
                 )
 

@@ -52,6 +52,21 @@ class ReportExporter:
                 )
             md.append("\n")
 
+        md.append("## Observed Endpoint Evidence\n")
+        if not report.observed_endpoints:
+            md.append("_No endpoint profiling records available._\n")
+        else:
+            md.append("| Domain | IP | Parent Entity (Tracker Radar) | Category | Country | ASN / Organisation | Third-Country Transfer |")
+            md.append("| --- | --- | --- | --- | --- | --- | --- |")
+            for endpoint in report.observed_endpoints:
+                md.append(
+                    f"| `{endpoint.domain}` | `{endpoint.ip_address or 'Unknown'}` | "
+                    f"{endpoint.parent_entity or 'Unknown'} | {endpoint.category} | "
+                    f"{endpoint.country_code or 'Unknown'} | {endpoint.asn_org or 'Unknown'} | "
+                    f"{endpoint.is_third_country_transfer} |"
+                )
+            md.append("\n")
+
         md.append("## Storage Mechanisms & Cookie Classifications\n")
         if not report.storage_classifications:
             md.append("_No storage mechanisms or cookies recorded/analyzed._\n")
@@ -65,13 +80,64 @@ class ReportExporter:
                 )
             md.append("\n")
 
+        md.append("## Entropy and Cookie-Lifetime Evidence\n")
+        total_entropy_occurrences = sum(token.occurrences for token in report.tracking_tokens)
+        md.append(f"**Unique high-entropy findings:** {len(report.tracking_tokens)}  ")
+        md.append(f"**Total occurrences:** {total_entropy_occurrences}  ")
+        md.append(f"**Cookie-lifetime records:** {len(report.cookie_longevity_results)}\n")
+        if report.tracking_tokens:
+            md.append("| Token Preview | Entropy | Occurrences | Location |")
+            md.append("| --- | --- | --- | --- |")
+            for token in report.tracking_tokens:
+                preview = token.token[:24] + "..." if len(token.token) > 24 else token.token
+                md.append(f"| `{preview}` | {token.entropy:.4f} | {token.occurrences} | `{token.location}` |")
+            md.append("\n")
+        if report.cookie_longevity_results:
+            md.append("| Cookie | Lifespan (Days) | Max-Age (Seconds) | Excessive (>90 Days) |")
+            md.append("| --- | --- | --- | --- |")
+            for cookie in report.cookie_longevity_results:
+                days = f"{cookie.lifespan_days:.2f}" if cookie.lifespan_days is not None else "Unknown"
+                md.append(
+                    f"| `{cookie.cookie_name}` | {days} | {cookie.max_age_seconds or 'Unknown'} | "
+                    f"{cookie.is_excessive_longevity} |"
+                )
+            md.append("\n")
+
+        md.append("## Seed-Match Evidence\n")
+        if not report.seed_matches:
+            md.append("_No controlled seed matches detected._\n")
+        else:
+            md.append("| Matched Value | Type | Location | Host |")
+            md.append("| --- | --- | --- | --- |")
+            for match in report.seed_matches:
+                md.append(
+                    f"| `{match.matched_value}` | {match.field_type} | `{match.location}` | "
+                    f"{match.host or 'Unknown'} |"
+                )
+            md.append("\n")
+
         md.append("## Browser and Device Fingerprinting Candidates\n")
-        if not report.fingerprint_vectors:
+        summary = report.fingerprint_summary
+        md.append(
+            f"**Vectors analysed:** {summary.total_vectors}  "
+            f"**Candidates:** {summary.candidate_vectors}  "
+            f"**Persistence findings:** {summary.persistence_findings}  "
+            f"**Maximum score:** {summary.maximum_heuristic_score:.2f}\n"
+        )
+        md.append(f"**Candidate rule:** {summary.candidate_rule}  ")
+        md.append(f"**Scoring method:** {summary.scoring_method}\n")
+        if summary.categories_observed:
+            category_stats = ", ".join(
+                f"{category}={count}" for category, count in sorted(summary.categories_observed.items())
+            )
+            md.append(f"**Categories observed:** {category_stats}\n")
+        candidate_vectors = [vector for vector in report.fingerprint_vectors if vector.is_candidate]
+        if not candidate_vectors:
             md.append("_No fingerprinting candidates detected by the attribute co-occurrence heuristic._\n")
         else:
             md.append("| Endpoint | Consent Phase | Categories | Score | Evidence Locations |")
             md.append("| --- | --- | --- | --- | --- |")
-            for vector in report.fingerprint_vectors:
+            for vector in candidate_vectors:
                 md.append(
                     f"| `{vector.endpoint}` | {vector.consent_phase.value} | "
                     f"{', '.join(vector.matched_categories)} | {vector.heuristic_score:.2f} | "
@@ -100,7 +166,7 @@ class ReportExporter:
                 md.append(
                     f"- **Declared Policy Claim:** {disc.declared_claim_quote or 'Not declared'}"
                 )
-                md.append(f"- **Remediation Recommendation:** {disc.remediation_recommendation}\n")
+                md.append("")
 
         return "\n".join(md)
 

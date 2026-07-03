@@ -31,11 +31,13 @@ from data_flow_analyser.engines.seed_hasher import (
 from data_flow_analyser.models.schemas import (
     CookieLongevityResult,
     FingerprintPersistenceFinding,
+    FingerprintAnalysisSummary,
     FingerprintVector,
     FullAuditReport,
     NetworkFlow,
     ObservedEndpoint,
     SeedData,
+    SeedMatchEvidence,
     TrackingToken,
 )
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
@@ -144,6 +146,8 @@ class AuditPipeline:
             f"Extracted {len(entropy_tokens)} high-entropy tokens "
             f"and {len(cookie_results)} set-cookie longevity records."
         )
+        entropy_tokens = self._aggregate_tracking_tokens(entropy_tokens)
+        logger.info("Reduced entropy evidence to %d unique token/location findings.", len(entropy_tokens))
 
         fingerprint_vectors: List[FingerprintVector]
         fingerprint_findings: List[FingerprintPersistenceFinding]
@@ -153,6 +157,9 @@ class AuditPipeline:
             consent_withdrawn_at=consent_withdrawn_at,
         )
         candidate_count = sum(vector.is_candidate for vector in fingerprint_vectors)
+        fingerprint_summary = self._summarize_fingerprints(
+            fingerprint_vectors, fingerprint_findings
+        )
         logger.info(
             "Extracted %d fingerprint candidate vectors and %d consent-phase findings.",
             candidate_count, len(fingerprint_findings),
@@ -178,10 +185,55 @@ class AuditPipeline:
             cookie_results=cookie_results,
             fingerprint_vectors=fingerprint_vectors,
             fingerprint_persistence_findings=fingerprint_findings,
+            fingerprint_summary=fingerprint_summary,
         )
+        # Preserve deterministic evidence in the report independently of LLM success.
+        report.fingerprint_vectors = fingerprint_vectors
+        report.fingerprint_persistence_findings = fingerprint_findings
+        report.fingerprint_summary = fingerprint_summary
+        report.observed_endpoints = endpoints
+        report.tracking_tokens = entropy_tokens
+        report.cookie_longevity_results = cookie_results
+        report.seed_matches = [SeedMatchEvidence(**match) for match in seed_matches]
 
         logger.info(f"Audit completed. Found {report.total_discrepancies_found} discrepancies.")
         return report
+
+    @staticmethod
+    def _summarize_fingerprints(
+        vectors: List[FingerprintVector],
+        findings: List[FingerprintPersistenceFinding],
+    ) -> FingerprintAnalysisSummary:
+        categories: Dict[str, int] = {}
+        phases: Dict[str, int] = {}
+        for vector in vectors:
+            phases[vector.consent_phase.value] = phases.get(vector.consent_phase.value, 0) + 1
+            for category in vector.matched_categories:
+                categories[category] = categories.get(category, 0) + 1
+        return FingerprintAnalysisSummary(
+            total_vectors=len(vectors),
+            candidate_vectors=sum(vector.is_candidate for vector in vectors),
+            categories_observed=categories,
+            consent_phases=phases,
+            persistence_findings=len(findings),
+            maximum_heuristic_score=max(
+                (vector.heuristic_score for vector in vectors), default=0.0
+            ),
+        )
+
+    @staticmethod
+    def _aggregate_tracking_tokens(
+        tokens: List[TrackingToken],
+    ) -> List[TrackingToken]:
+        """Collapse repeated entropy findings while retaining occurrence counts."""
+        aggregated: Dict[tuple[str, str], TrackingToken] = {}
+        for token in tokens:
+            key = (token.token, token.location)
+            if key in aggregated:
+                aggregated[key].occurrences += token.occurrences
+            else:
+                aggregated[key] = token.model_copy()
+        return list(aggregated.values())
 
     @staticmethod
     def _validate_consent_timeline(

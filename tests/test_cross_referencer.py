@@ -83,8 +83,7 @@ def test_parse_audit_report_json():
           "category": "plaintext_personal_data_leak",
           "severity": "CRITICAL",
           "observed_evidence": "User email (user@example.com) transmitted in request payload to tracker.unseen-ads.com.",
-          "declared_claim_quote": "None declared for unseen-ads.com",
-          "remediation_recommendation": "Halt traffic to unseen-ads.com or update DPA to include processing purpose."
+              "declared_claim_quote": "None declared for unseen-ads.com"
         }
       ]
     }
