@@ -15,7 +15,7 @@
 from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.models.schemas import (
     DiscrepancyCategory,
-    DiscrepancySeverity,
+    IndicativeRiskLevel,
     EndpointClassificationType,
     StorageClassificationResult,
     StorageClassificationType,
@@ -81,7 +81,10 @@ def test_parse_audit_report_json():
           "discrepancy_id": "DISC-001",
           "title": "Plaintext Email Leak to Undocumented Subprocessor",
           "category": "plaintext_personal_data_leak",
-          "severity": "CRITICAL",
+          "likelihood": "more_likely_than_not",
+          "severity_impact": "serious_harm",
+          "potential_harms": ["loss_of_control"],
+          "assessment_basis": "Personal data is sent to an undocumented tracker.",
           "observed_evidence": "User email (user@example.com) transmitted in request payload to tracker.unseen-ads.com.",
               "declared_claim_quote": "None declared for unseen-ads.com"
         }
@@ -96,7 +99,7 @@ def test_parse_audit_report_json():
     )
 
     assert report.audit_title == "Technical Discrepancy Audit - ACME Portal"
-    assert report.total_flows_analyzed == 12
+    assert report.total_flows_analysed == 12
 
     # Verify Endpoint Classifications
     assert len(report.endpoint_classifications) == 3
@@ -123,7 +126,8 @@ def test_parse_audit_report_json():
     assert len(report.discrepancies) == 1
     disc = report.discrepancies[0]
     assert disc.category == DiscrepancyCategory.PLAINTEXT_PERSONAL_DATA_LEAK
-    assert disc.severity == DiscrepancySeverity.CRITICAL
+    assert disc.risk_assessment.indicative_level == IndicativeRiskLevel.HIGH
+    assert disc.risk_assessment.risk_score == 9
     assert "user@example.com" in disc.observed_evidence
 
 

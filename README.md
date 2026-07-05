@@ -94,6 +94,42 @@ The document ingestor sends the complete aggregated policy/DPA text by default t
 
 The cross-referencer then receives structured policy claims together with observed endpoints, seed matches, entropy candidates, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
 
+### Indicative risk evaluation
+
+Discrepancy risk is evaluated using a deterministic likelihood-and-severity method informed by GDPR Recital 75 and based on the [Information Commissioner's Office (UK ICO) DPIA method](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/accountability-and-governance/data-protection-impact-assessments-dpias/how-do-we-do-a-dpia#how10). The LLM identifies relevant potential harms and provides the factual basis for two inputs; the application calculates the score and indicative level. This prevents the LLM from freely choosing the final risk category.
+
+The harm assessment considers physical, material, and non-material damage, including:
+
+- Discrimination, identity theft or fraud, and financial loss.
+- Reputational damage and loss of confidentiality.
+- Unauthorised reversal of pseudonymisation.
+- Significant economic or social disadvantage.
+- Loss of control over personal data or inability to exercise rights.
+- Special-category data and criminal-conviction data.
+- Profiling of personal aspects such as interests, behaviour, health, economic situation, location, or movements.
+- Data concerning vulnerable people, particularly children.
+- Large-scale processing affecting many data subjects.
+
+Likelihood and severity use three levels:
+
+| Score | Likelihood of harm | Severity of impact |
+| ---: | --- | --- |
+| 1 | Remote | Minimal impact |
+| 2 | Reasonable possibility | Some impact |
+| 3 | More likely than not | Serious harm |
+
+The risk score is `likelihood × severity`. The indicative matrix is:
+
+| Likelihood \\ Severity | 1 | 2 | 3 |
+| --- | --- | --- | --- |
+| 1 | Low | Low | Low |
+| 2 | Low | Medium | High |
+| 3 | Low | High | High |
+
+These levels are indications for human review, not definitive legal conclusions. The Markdown and JSON reports include the inputs, score, indicative level, potential harms, assessment basis, and a human-verification flag.
+
+### Debugging
+
 With `--verbose`, the exact system and user prompts sent to both LLM calls are written to the console. With `--log-file`, they can be retained for reproducibility. Because these prompts can contain complete policy documents and traffic-derived values, log files must be protected as sensitive research data.
 
 ## Installation
@@ -171,25 +207,36 @@ Available output formats are JSON and Markdown. If neither `--out-json` nor `--o
 flowchart TD
     A["Capture + policy documents"] --> B["Parse and normalise flows"]
 
-    B --> C["Decode payloads\nJSON · Base64 · URL encoding"]
-    B --> D["Match controlled seed values\nPlaintext · hashes · Base64"]
-    B --> E["Analyse identifiers\nEntropy · cookies · lifetimes"]
-    B --> F["Detect fingerprint vectors\nQuery · headers · decoded bodies"]
-    B --> G["Profile endpoints\nDNS · GeoIP · Tracker Radar"]
+    subgraph DET["Deterministic analysis"]
+        B --> C["Decode payloads\nJSON · Base64 · URL encoding"]
+        B --> D["Match controlled seed values\nPlaintext · hashes · Base64"]
+        B --> E["Analyse identifiers\nEntropy · cookies · lifetimes"]
+        B --> F["Detect fingerprint vectors\nQuery · headers · decoded bodies"]
+        B --> G["Profile endpoints\nDNS · GeoIP · Tracker Radar"]
+        C --> I["Structured technical evidence"]
+        D --> I
+        E --> I
+        F --> I
+        G --> I
+        M["Risk evaluator\nLikelihood × severity · fixed matrix"]
+    end
 
-    A --> H["Extract policy claims\nLLM document analysis"]
+    subgraph AI["AI-powered analysis"]
+        A --> H["Extract policy claims\nLLM document analysis"]
+        H --> J["Policy context"]
+        I --> K["Cross-reference audit\nLLM + rule-based storage checks"]
+        J --> K
+        K --> L["LLM proposes GDPR Recital 75\nharm categories and rating inputs"]
+    end
 
-    C --> I["Structured technical evidence"]
-    D --> I
-    E --> I
-    F --> I
-    G --> I
+    subgraph OUT["Human-verifiable output"]
+        N["Risk inputs · score · level · evidence"]
+        O["JSON and Markdown reports"]
+    end
 
-    H --> J["Policy context"]
-    I --> K["Cross-reference audit\nLLM + rule-based storage checks"]
-    J --> K
-    K --> L["Human-verifiable findings\nEndpoints · storage · discrepancies"]
-    L --> M["JSON and Markdown reports"]
+    L --> M
+    M --> N
+    N --> O
 
     classDef input fill:#e8f1ff,stroke:#356ae6,color:#123;
     classDef analysis fill:#eef9f0,stroke:#3b8f52,color:#132;
@@ -197,9 +244,9 @@ flowchart TD
     classDef output fill:#f3eaff,stroke:#7a45b5,color:#231;
 
     class A input;
-    class B,C,D,E,F,G,I analysis;
-    class H,J,K model;
-    class L,M output;
+    class B,C,D,E,F,G,I,M analysis;
+    class H,J,K,L model;
+    class N,O output;
 ```
 
 ## Development and testing
@@ -210,7 +257,7 @@ Run the test suite from the project virtual environment:
 .venv/bin/python -m pytest -q
 ```
 
-The test suite covers decoding, entropy and cookie-lifetime analysis, seed matching, endpoint profiling, document ingestion, cross-referencing, pipeline execution, and fingerprint-vector/consent-phase analysis.
+The test suite covers decoding, entropy and cookie-lifetime analysis, seed matching, endpoint profiling, document ingestion, cross-referencing, pipeline execution, fingerprint-vector/consent-phase analysis, and the deterministic ICO-style risk evaluator.
 
 For reproducible research, retain the capture file, policy-document versions, seed-file version, consent timestamps, model/provider configuration, verbose logfile, and generated JSON report together. External endpoint metadata should also be treated as time-dependent evidence.
 

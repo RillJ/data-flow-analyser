@@ -18,6 +18,10 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+# ---------------------------------------------------------------------------
+# Core captured traffic and test-data models
+# ---------------------------------------------------------------------------
+
 class NetworkFlow(BaseModel):
     """A parsed HTTP(S) transaction evaluated during the assessment."""
 
@@ -67,6 +71,10 @@ class PolicyStatement(BaseModel):
     stated_purposes: List[str] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# Derived traffic evidence and legacy scoring components
+# ---------------------------------------------------------------------------
+
 class RiskComponents(BaseModel):
     """Individual normalized factors contributing to a network flow risk score."""
 
@@ -108,6 +116,10 @@ class SeedMatchEvidence(BaseModel):
     location: str
     host: Optional[str] = None
 
+
+# ---------------------------------------------------------------------------
+# Browser and device fingerprinting models
+# ---------------------------------------------------------------------------
 
 class ConsentPhase(str, Enum):
     """Consent state inferred from user-supplied capture timestamps."""
@@ -169,6 +181,10 @@ class FingerprintAnalysisSummary(BaseModel):
     scoring_method: str = "attribute co-occurrence heuristic; no population-frequency baseline configured"
 
 
+# ---------------------------------------------------------------------------
+# Cookie and storage profiling models
+# ---------------------------------------------------------------------------
+
 class CookieLongevityResult(BaseModel):
     """Represents cookie lifespan analysis from Set-Cookie headers."""
 
@@ -179,6 +195,10 @@ class CookieLongevityResult(BaseModel):
     lifespan_days: Optional[float] = None
     is_excessive_longevity: bool = False  # True if > 90 days.
 
+
+# ---------------------------------------------------------------------------
+# Policy-document extraction models
+# ---------------------------------------------------------------------------
 
 class DataCategoryType(str, Enum):
     CONTENT_DATA = "content_data"
@@ -208,6 +228,10 @@ class DeclaredSubprocessor(BaseModel):
     country_or_location: Optional[str] = None
     citation_excerpt: Optional[str] = None
 
+
+# ---------------------------------------------------------------------------
+# Storage declarations and rule-based classifications
+# ---------------------------------------------------------------------------
 
 class StorageTechnologyType(str, Enum):
     COOKIE = "cookie"
@@ -262,6 +286,10 @@ class DocumentAnalysisResult(BaseModel):
     raw_document_length: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Endpoint and policy classification models
+# ---------------------------------------------------------------------------
+
 class EndpointClassificationType(str, Enum):
     INTERNAL = "internal"
     DOCUMENTED_SUBPROCESSOR = "documented_subprocessor"
@@ -278,6 +306,10 @@ class EndpointClassificationResult(BaseModel):
     citation_excerpt: Optional[str] = None  # quote from DPA/Policy if documented
 
 
+# ---------------------------------------------------------------------------
+# Deterministic ICO-style risk assessment and final report models
+# ---------------------------------------------------------------------------
+
 class DiscrepancyCategory(str, Enum):
     UNDOCUMENTED_ENDPOINT = "undocumented_endpoint"
     UNANNOUNCED_DATA_COLLECTION = "unannounced_data_collection"
@@ -290,11 +322,40 @@ class DiscrepancyCategory(str, Enum):
     FINGERPRINTING_AFTER_WITHDRAWAL = "fingerprinting_after_withdrawal"
 
 
-class DiscrepancySeverity(str, Enum):
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
+class HarmLikelihood(str, Enum):
+    REMOTE = "remote"
+    REASONABLE_POSSIBILITY = "reasonable_possibility"
+    MORE_LIKELY_THAN_NOT = "more_likely_than_not"
+
+    @property
+    def score(self) -> int:
+        return list(type(self)).index(self) + 1
+
+
+class ImpactSeverity(str, Enum):
+    MINIMAL_IMPACT = "minimal_impact"
+    SOME_IMPACT = "some_impact"
+    SERIOUS_HARM = "serious_harm"
+
+    @property
+    def score(self) -> int:
+        return list(type(self)).index(self) + 1
+
+
+class IndicativeRiskLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class RiskAssessment(BaseModel):
+    likelihood: HarmLikelihood
+    severity_impact: ImpactSeverity
+    risk_score: int = Field(ge=1, le=9)
+    indicative_level: IndicativeRiskLevel
+    potential_harms: List[str] = Field(default_factory=list)
+    assessment_basis: str = ""
+    human_verification_required: bool = True
 
 
 class ComplianceDiscrepancy(BaseModel):
@@ -303,7 +364,7 @@ class ComplianceDiscrepancy(BaseModel):
     discrepancy_id: str
     title: str
     category: DiscrepancyCategory
-    severity: DiscrepancySeverity
+    risk_assessment: RiskAssessment
     observed_evidence: str  # example: "Plaintext email sent to api.mixpanel.com (US, IP 142.250.179.196)"
     declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "Not declared"
 
@@ -323,6 +384,6 @@ class FullAuditReport(BaseModel):
     cookie_longevity_results: List[CookieLongevityResult] = []
     seed_matches: List[SeedMatchEvidence] = []
     discrepancies: List[ComplianceDiscrepancy] = []
-    total_flows_analyzed: int = 0
+    total_flows_analysed: int = 0
     total_discrepancies_found: int = 0
     requires_human_verification: bool = True

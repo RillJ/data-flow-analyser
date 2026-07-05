@@ -32,7 +32,7 @@ class ReportExporter:
         """Renders the FullAuditReport as a structured Markdown document."""
         md = []
         md.append(f"# {report.audit_title}\n")
-        md.append(f"**Analyzed Flows:** {report.total_flows_analyzed}  ")
+        md.append(f"**Analysed Flows:** {report.total_flows_analysed}  ")
         md.append(f"**Discrepancies Found:** {report.total_discrepancies_found}  ")
         md.append(f"**Human Verification Required:** {report.requires_human_verification}\n")
 
@@ -40,6 +40,7 @@ class ReportExporter:
         md.append(f"{report.summary}\n")
 
         md.append("## Endpoint Classifications\n")
+        md.append("_Interpretation: compares each observed host with the submitted policy documents. ‘Undocumented’ means no matching declaration was found in those documents; it is not proof that no declaration exists elsewhere._\n")
         if not report.endpoint_classifications:
             md.append("_No endpoint classifications recorded._\n")
         else:
@@ -53,6 +54,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Observed Endpoint Evidence\n")
+        md.append("_Interpretation: DNS, GeoIP, ASN, and DDG Tracker Radar enrich the destination identity. Missing values indicate unavailable enrichment or no supplied IP, not that the endpoint is safe._\n")
         if not report.observed_endpoints:
             md.append("_No endpoint profiling records available._\n")
         else:
@@ -68,8 +70,9 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Storage Mechanisms & Cookie Classifications\n")
+        md.append("_Interpretation: compares observed cookies and storage mechanisms with policy declarations. A long lifetime is a retention indicator; it is not alone proof that a cookie is a tracker or unlawful._\n")
         if not report.storage_classifications:
-            md.append("_No storage mechanisms or cookies recorded/analyzed._\n")
+            md.append("_No storage mechanisms or cookies recorded/analysed._\n")
         else:
             md.append("| Name | Type | Observed Duration (Days) | Classification | Reasoning |")
             md.append("| --- | --- | --- | --- | --- |")
@@ -81,6 +84,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Entropy and Cookie-Lifetime Evidence\n")
+        md.append("_Interpretation: high-entropy values are candidate identifiers. Occurrences and locations show possible reuse; cookie lifetime indicates persistence and requires contextual review._\n")
         total_entropy_occurrences = sum(token.occurrences for token in report.tracking_tokens)
         md.append(f"**Unique high-entropy findings:** {len(report.tracking_tokens)}  ")
         md.append(f"**Total occurrences:** {total_entropy_occurrences}  ")
@@ -104,6 +108,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Seed-Match Evidence\n")
+        md.append("_Interpretation: a controlled test value, or a recognised encoding/hash of it, was found in traffic. Verify whether the destination and transmission context were authorised for that value._\n")
         if not report.seed_matches:
             md.append("_No controlled seed matches detected._\n")
         else:
@@ -117,6 +122,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Browser and Device Fingerprinting Candidates\n")
+        md.append("_Interpretation: candidates are heuristic signals from bundled browser/device attributes, not proof of unique fingerprinting. Review the attributes, endpoint, phase, and evidence locations._\n")
         summary = report.fingerprint_summary
         md.append(
             f"**Vectors analysed:** {summary.total_vectors}  "
@@ -146,6 +152,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Fingerprinting Consent-Phase Findings\n")
+        md.append("_Interpretation: persistence findings are strongest when the same candidate continues after an explicitly recorded withdrawal. An `unknown` phase means timestamps were unavailable or inconclusive; it does not mean consent was denied._\n")
         if not report.fingerprint_persistence_findings:
             md.append("_No candidate vectors were observed in pre-consent or withdrawn phases._\n")
         else:
@@ -156,12 +163,37 @@ class ReportExporter:
             md.append("")
 
         md.append("## Detected Compliance Discrepancies\n")
+        md.append("_Interpretation: review observed evidence first, then the policy comparison, GDPR Recital 75 harm categories, and the indicative likelihood/severity assessment. The risk level prioritises human review and is not a definitive legal conclusion._\n")
         if not report.discrepancies:
             md.append("_No discrepancies detected between observed traffic and policy claims._\n")
         else:
+            risk_cells = {(likelihood, severity): [] for likelihood in range(1, 4) for severity in range(1, 4)}
             for disc in report.discrepancies:
-                md.append(f"### [{disc.severity.value}] {disc.discrepancy_id}: {disc.title}")
+                risk = disc.risk_assessment
+                risk_cells[(risk.likelihood.score, risk.severity_impact.score)].append(
+                    disc.discrepancy_id
+                )
+
+            md.append("### Indicative Risk Matrix\n")
+            md.append("Risk IDs are placed using their calculated likelihood and severity inputs.\n")
+            md.append("| Likelihood \\ Severity | 1 — Minimal impact | 2 — Some impact | 3 — Serious harm |")
+            md.append("| --- | --- | --- | --- |")
+            for likelihood, label in (
+                (1, "1 — Remote"),
+                (2, "2 — Reasonable possibility"),
+                (3, "3 — More likely than not"),
+            ):
+                cells = [", ".join(risk_cells[(likelihood, severity)]) or "—" for severity in range(1, 4)]
+                md.append(f"| {label} | {cells[0]} | {cells[1]} | {cells[2]} |")
+            md.append("\n")
+
+            for disc in report.discrepancies:
+                risk = disc.risk_assessment
+                md.append(f"### [{risk.indicative_level.value.upper()}] {disc.discrepancy_id}: {disc.title}")
                 md.append(f"- **Category:** `{disc.category.value}`")
+                md.append(f"- **Indicative risk:** {risk.indicative_level.value} (likelihood {risk.likelihood.score} × severity {risk.severity_impact.score} = {risk.risk_score})")
+                md.append(f"- **Potential harms:** {', '.join(risk.potential_harms) or 'Not specified'}")
+                md.append(f"- **Assessment basis:** {risk.assessment_basis or 'Not specified'}")
                 md.append(f"- **Observed Evidence:** {disc.observed_evidence}")
                 md.append(
                     f"- **Declared Policy Claim:** {disc.declared_claim_quote or 'Not declared'}"

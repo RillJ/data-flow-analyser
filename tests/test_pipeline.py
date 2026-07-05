@@ -100,7 +100,10 @@ def test_pipeline_execution(
                             "discrepancy_id": "DISC-001",
                             "title": "Unannounced Subprocessor Data Flow",
                             "category": "undocumented_endpoint",
-                            "severity": "HIGH",
+                            "likelihood": "reasonable_possibility",
+                            "severity_impact": "some_impact",
+                            "potential_harms": ["loss_of_control"],
+                            "assessment_basis": "Undocumented third-party transfer observed.",
                             "observed_evidence": "Transmitted user email to api.mixpanel.com",
                             "declared_claim_quote": "Not declared",
                         }
@@ -127,7 +130,7 @@ def test_pipeline_execution(
     )
 
     assert isinstance(report, FullAuditReport)
-    assert report.total_flows_analyzed == 1
+    assert report.total_flows_analysed == 1
     assert report.total_discrepancies_found == 1
     assert report.discrepancies[0].discrepancy_id == "DISC-001"
     

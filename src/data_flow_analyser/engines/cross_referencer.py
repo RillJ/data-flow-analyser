@@ -22,7 +22,8 @@ from data_flow_analyser.models.schemas import (
     ComplianceDiscrepancy,
     CookieLongevityResult,
     DiscrepancyCategory,
-    DiscrepancySeverity,
+    HarmLikelihood,
+    ImpactSeverity,
     DocumentAnalysisResult,
     EndpointClassificationResult,
     EndpointClassificationType,
@@ -38,8 +39,26 @@ from data_flow_analyser.models.schemas import (
     StorageTechnologyType,
     TrackingToken,
 )
+from data_flow_analyser.engines.risk_evaluator import assess_risk
 
 logger = logging.getLogger(__name__)
+
+GDPR_RECITAL_75_RISK_DEFINITION = """
+GDPR Recital 75 — Risks to the Rights and Freedoms of Natural Persons
+
+The risk to the rights and freedoms of natural persons, of varying likelihood and
+severity, may result from personal data processing which could lead to physical,
+material or non-material damage, in particular: discrimination; identity theft or
+fraud; financial loss; damage to reputation; loss of confidentiality; unauthorised
+reversal of pseudonymisation; any other significant economic or social disadvantage;
+depriving data subjects of their rights and freedoms or preventing them from
+exercising control over their personal data; processing special-category data or
+criminal-conviction data; evaluating personal aspects such as performance, economic
+situation, health, preferences, interests, reliability, behaviour, location or
+movements to create or use profiles; processing personal data of vulnerable people,
+particularly children; or processing a large amount of personal data affecting a
+large number of data subjects.
+"""
 
 SYSTEM_PROMPT = """
 You are an expert Privacy Legal Auditor conducting a technical Data Protection Impact Assessment (DPIA).
@@ -67,6 +86,24 @@ You must produce an auditable report evaluating:
    - Candidate browser/device fingerprint vectors, especially those observed before consent or after withdrawal.
 
 Fingerprint vectors are technical candidates based on attribute co-occurrence, not proof of unique identification. Only treat a consent-phase finding as evidence when the supplied phase is explicit; do not infer missing consent states.
+
+RISK ASSESSMENT — GDPR RECITAL 75
+Before rating each discrepancy, identify which Recital 75 harm categories are
+supported by the observed technical evidence. Consider physical, material, and
+non-material damage and risks to the rights and freedoms of natural persons. Do
+not treat a policy mismatch alone as proof of a particular harm; explain the
+evidential connection and use an empty list when no category is supported.
+
+Use `potential_harms` for supported categories such as discrimination, identity
+theft or fraud, financial loss, reputational damage, loss of confidentiality,
+unauthorised reversal of pseudonymisation, significant economic or social
+disadvantage, loss of control or inability to exercise rights, special-category
+data, profiling, vulnerable data subjects (including children), and large-scale
+processing. Explain the connection in `assessment_basis`. Then provide the
+likelihood and severity inputs.
+
+The following is the governing definition supplied for this assessment:
+""" + GDPR_RECITAL_75_RISK_DEFINITION + """
 
 For EVERY discrepancy, provide the exact technical evidence observed and cite the verbatim policy quote (or 'Not declared' if missing).
 
@@ -96,7 +133,10 @@ Respond strictly in JSON matching this schema:
       "discrepancy_id": "DISC-001",
       "title": "Short descriptive title",
       "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|plaintext_personal_data_leak|fingerprinting_candidate|fingerprinting_after_withdrawal",
-      "severity": "LOW|MEDIUM|HIGH|CRITICAL",
+      "likelihood": "remote|reasonable_possibility|more_likely_than_not",
+      "severity_impact": "minimal_impact|some_impact|serious_harm",
+      "potential_harms": ["loss_of_control"],
+      "assessment_basis": "Factual basis for the two ratings",
       "observed_evidence": "Factual description of wire observations",
       "declared_claim_quote": "Verbatim quote from policy or 'Not declared'"
     }
@@ -216,7 +256,7 @@ class LLMCrossReferencer:
                 return FullAuditReport(
                     audit_title="Technical Audit (Failed)",
                     summary="Failed to get response choices from LLM.",
-                    total_flows_analyzed=len(flows),
+                    total_flows_analysed=len(flows),
                     fingerprint_vectors=fingerprint_vectors,
                     fingerprint_persistence_findings=fingerprint_persistence_findings,
                 )
@@ -226,7 +266,7 @@ class LLMCrossReferencer:
                 return FullAuditReport(
                     audit_title="Technical Audit (Empty Response)",
                     summary="LLM returned empty output.",
-                    total_flows_analyzed=len(flows),
+                    total_flows_analysed=len(flows),
                     fingerprint_vectors=fingerprint_vectors,
                     fingerprint_persistence_findings=fingerprint_persistence_findings,
                 )
@@ -248,7 +288,7 @@ class LLMCrossReferencer:
                 audit_title="Technical Privacy Audit",
                 summary=f"Analysis encountered an execution error: {str(e)}",
                 storage_classifications=rule_based_storage_eval,
-                total_flows_analyzed=len(flows),
+                total_flows_analysed=len(flows),
                 fingerprint_vectors=fingerprint_vectors,
                 fingerprint_persistence_findings=fingerprint_persistence_findings,
             )
@@ -417,11 +457,14 @@ class LLMCrossReferencer:
                 except ValueError:
                     cat = DiscrepancyCategory.UNDOCUMENTED_ENDPOINT
 
-                sev_str = disc.get("severity", "MEDIUM").upper()
-                try:
-                    sev = DiscrepancySeverity(sev_str)
-                except ValueError:
-                    sev = DiscrepancySeverity.MEDIUM
+                likelihood = HarmLikelihood(disc["likelihood"])
+                severity = ImpactSeverity(disc["severity_impact"])
+                risk = assess_risk(
+                    likelihood,
+                    severity,
+                    disc.get("potential_harms", []),
+                    disc.get("assessment_basis", ""),
+                )
 
                 discrepancies.append(
                     ComplianceDiscrepancy(
@@ -430,7 +473,7 @@ class LLMCrossReferencer:
                         ),
                         title=disc.get("title", "Discrepancy Found"),
                         category=cat,
-                        severity=sev,
+                        risk_assessment=risk,
                         observed_evidence=disc.get("observed_evidence", ""),
                         declared_claim_quote=disc.get("declared_claim_quote"),
                     )
@@ -442,7 +485,7 @@ class LLMCrossReferencer:
                 endpoint_classifications=endpoint_classifications,
                 storage_classifications=storage_classifications,
                 discrepancies=discrepancies,
-                total_flows_analyzed=flow_count,
+                total_flows_analysed=flow_count,
                 total_discrepancies_found=len(discrepancies),
                 requires_human_verification=True,
             )
@@ -452,5 +495,5 @@ class LLMCrossReferencer:
                 audit_title="Technical Privacy Audit (Parsing Fallback)",
                 summary="Raw LLM output could not be fully parsed into structured JSON.",
                 storage_classifications=fallback_storage,
-                total_flows_analyzed=flow_count,
+                total_flows_analysed=flow_count,
             )
