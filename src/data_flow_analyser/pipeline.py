@@ -79,7 +79,7 @@ class AuditPipeline:
         Executes the full end-to-end privacy audit pipeline.
 
         Args:
-            flow_file_path: Path to the mitmproxy capture dump file.
+            flow_file_path: Path to a mitmproxy flow dump or HAR capture file.
             documents: Single file path, text string, or sequence/list of file paths/texts.
             seed_data: User PII key-value pairs or pre-computed SeedData.
             consent_granted_at: Optional timestamp at which the user gave consent.
@@ -98,7 +98,7 @@ class AuditPipeline:
         self._validate_consent_timeline(consent_granted_at, consent_withdrawn_at)
 
         path_str = str(target_flow_path)
-        logger.info(f"Loading and parsing mitmproxy flow capture file: {path_str}")
+        logger.info(f"Loading and parsing network capture file: {path_str}")
         flows: List[NetworkFlow] = parse_flow_file(path_str)
         logger.info(f"Extracted {len(flows)} total network flows.")
         for index, flow in enumerate(flows, start=1):

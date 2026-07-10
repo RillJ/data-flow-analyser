@@ -14,6 +14,7 @@
 
 import json
 import logging
+import tempfile
 from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -26,19 +27,33 @@ from mitmproxy.io import FlowReader
 
 from data_flow_analyser.models.schemas import NetworkFlow
 from data_flow_analyser.parsers.decoder import recursive_decode
+from data_flow_analyser.parsers.har_converter import har_to_flows
 
 logger = logging.getLogger(__name__)
 
 
-def parse_flow_file(file_path: str) -> List[NetworkFlow]:
-    """Parse a mitmproxy flow dump and skip individual unreadable flows.
+def parse_flow_file(file_path: str | Path) -> List[NetworkFlow]:
+    """Parse a mitmproxy flow dump or HAR file.
 
-    HAR files are (intentionally) not parsed for now.
+    HAR files are converted to a temporary mitmproxy flow dump first, keeping
+    the rest of the parsing and analysis pipeline format-independent.
     """
     path = Path(file_path)
     if path.suffix.lower() == ".har":
-        logger.warning("HAR parsing is not (yet) supported: %s", path)
-        return []
+        logger.info("Converting HAR capture to a temporary mitmproxy flow dump: %s", path)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".flows") as converted:
+                har_to_flows(path, converted.name)
+                return _parse_mitmproxy_flow_file(Path(converted.name))
+        except (OSError, ValueError) as error:
+            logger.warning("Unable to convert HAR file %s: %s", path, error)
+            return []
+
+    return _parse_mitmproxy_flow_file(path)
+
+
+def _parse_mitmproxy_flow_file(path: Path) -> List[NetworkFlow]:
+    """Parse a mitmproxy flow dump and skip individual unreadable flows."""
 
     parsed_flows: List[NetworkFlow] = []
     logger.debug("Flow parsing started: path=%s", path)

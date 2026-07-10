@@ -18,13 +18,13 @@ The current implementation contributes to that question by combining determinist
 
 ### Network-flow parsing
 
-- Reads mitmproxy flow-dump files.
+- Reads mitmproxy flow-dump files and HAR files.
+- Converts HAR entries to temporary mitmproxy flows automatically, so HAR captures use the same analysis path and do not create sidecar files.
 - Converts HTTP flows into a common `NetworkFlow` schema.
 - Extracts URLs, query paths, request and response headers, request and response bodies, timestamps, status codes, and cookies.
 - Recursively decodes JSON, Base64, and URL-encoded payloads where possible.
 - Skips unsupported or malformed flows with diagnostic logging.
 
-HAR input is currently recognised but not parsed. The primary supported capture format is a mitmproxy flow dump.
 
 ### Personal-data and identifier detection
 
@@ -269,7 +269,8 @@ src/data_flow_analyser/
 ├── pipeline.py                    End-to-end orchestration
 ├── models/schemas.py              Shared evidence and report schemas
 ├── parsers/
-│   ├── mitm_parser.py              mitmproxy flow parsing
+│   ├── har_converter.py            HAR-to-mitmproxy conversion
+│   ├── mitm_parser.py              mitmproxy flow and HAR parsing
 │   └── decoder.py                  Recursive payload decoding
 ├── engines/
 │   ├── endpoint_profiler.py        DNS, GeoIP, ASN, and tracker metadata

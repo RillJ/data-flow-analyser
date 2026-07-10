@@ -100,7 +100,7 @@ def audit(
         ...,
         "--capture",
         "-c",
-        help="Path to input mitmproxy flow capture file.",
+        help="Path to input mitmproxy flow or HAR capture file.",
         exists=True,
         file_okay=True,
         dir_okay=False,
