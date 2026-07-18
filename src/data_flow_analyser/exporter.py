@@ -34,7 +34,20 @@ class ReportExporter:
         md.append(f"# {report.audit_title}\n")
         md.append(f"**Analysed Flows:** {report.total_flows_analysed}  ")
         md.append(f"**Discrepancies Found:** {report.total_discrepancies_found}  ")
+        md.append(f"**Analysis Status:** {report.analysis_status}  ")
         md.append(f"**Human Verification Required:** {report.requires_human_verification}\n")
+
+        md.append("## Reproducibility Metadata\n")
+        provenance = report.provenance
+        md.append(f"- **Tool version:** `{provenance.tool_version}`")
+        md.append(f"- **LLM model:** `{provenance.model or 'not recorded'}`")
+        md.append(f"- **Temperature:** `{provenance.temperature if provenance.temperature is not None else 'not recorded'}`")
+        md.append(f"- **External metadata:** `{provenance.external_metadata_mode}`")
+        if report.warnings:
+            md.append("\n### Analysis Warnings\n")
+            for warning in report.warnings:
+                md.append(f"- {warning}")
+        md.append("")
 
         md.append("## Executive Summary\n")
         md.append(f"{report.summary}\n")
@@ -198,6 +211,10 @@ class ReportExporter:
                 md.append(
                     f"- **Declared Policy Claim:** {disc.declared_claim_quote or 'Not declared'}"
                 )
+                if disc.evidence_references:
+                    md.append(
+                        f"- **Evidence Flow IDs:** {', '.join(f'`{flow_id}`' for flow_id in disc.evidence_references)}"
+                    )
                 md.append("")
 
         return "\n".join(md)

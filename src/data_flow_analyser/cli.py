@@ -141,6 +141,13 @@ def audit(
         "--model",
         help="LiteLLM model name to use for analysis.",
     ),
+    temperature: float = typer.Option(
+        1.0,
+        "--temperature",
+        min=0.0,
+        max=2.0,
+        help="LLM sampling temperature; 1.0 is the reproducible default.",
+    ),
     api_key: Optional[str] = typer.Option(
         None,
         "--api-key",
@@ -189,6 +196,7 @@ def audit(
     with console.status("[bold green]Executing privacy audit pipeline...", spinner="dots"):
         pipeline = AuditPipeline(
             llm_model=model,
+            temperature=temperature,
             api_key=api_key,
             api_base=api_base,
         )

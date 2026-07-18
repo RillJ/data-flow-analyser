@@ -28,6 +28,7 @@ from data_flow_analyser.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
+
 SYSTEM_PROMPT = """
 You are an expert Privacy Legal Auditor conducting a Data Protection Impact Assessment (DPIA).
 Your task is to analyse the provided Privacy Policy, Cookie Policy, or Data Processing Agreement (DPA) and extract structured compliance claims.
@@ -93,10 +94,12 @@ class PolicyDocumentIngestor:
         model: str = "gpt-5.4-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
+        temperature: float = 1.0,
     ):
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
+        self.temperature = temperature
 
     def analyse_document_text(
         self,
@@ -106,7 +109,11 @@ class PolicyDocumentIngestor:
         logger.debug("Document ingestion started: title=%s chars=%d model=%s", document_title, len(text_content), self.model)
         if not text_content.strip():
             logger.debug("Document ingestion skipped: empty document")
-            return DocumentAnalysisResult(document_title=document_title)
+            return DocumentAnalysisResult(
+                document_title=document_title,
+                analysis_status="partial",
+                warnings=["The supplied document text was empty."],
+            )
 
         try:
             user_prompt = (
@@ -127,12 +134,10 @@ class PolicyDocumentIngestor:
                     model=self.model,
                     messages=[
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": user_prompt,
-                        }
+                        {"role": "user", "content": user_prompt},
                     ],
                     response_format={"type": "json_object"},
+                    temperature=self.temperature,
                     api_key=self.api_key,
                     api_base=self.api_base,
                 )
@@ -143,7 +148,9 @@ class PolicyDocumentIngestor:
             if not response.choices or not response.choices[0].message:
                 return DocumentAnalysisResult(
                     document_title=document_title,
-                    raw_document_length=len(text_content)
+                    raw_document_length=len(text_content),
+                    analysis_status="failed",
+                    warnings=["The document LLM returned no response choices."],
                 )
 
             raw_json_str: Optional[str] = response.choices[0].message.content
@@ -152,7 +159,9 @@ class PolicyDocumentIngestor:
             if not raw_json_str:
                 return DocumentAnalysisResult(
                     document_title=document_title,
-                    raw_document_length=len(text_content)
+                    raw_document_length=len(text_content),
+                    analysis_status="failed",
+                    warnings=["The document LLM returned an empty response."],
                 )
 
             result = self._parse_llm_json(raw_json_str, document_title, len(text_content))
@@ -163,9 +172,15 @@ class PolicyDocumentIngestor:
             logger.exception("Document extraction failed: model=%s error=%s", self.model, e)
             result = DocumentAnalysisResult(
                 document_title=document_title,
-                raw_document_length=len(text_content)
+                raw_document_length=len(text_content),
+                analysis_status="failed",
+                warnings=[f"Document LLM execution failed: {type(e).__name__}"],
             )
-            logger.debug("Document JSON parsed: categories=%d subprocessors=%d storage_items=%d", len(categories), len(subprocessors), len(storage_items))
+            logger.debug(
+                "Document analysis failed: status=%s warnings=%s",
+                result.analysis_status,
+                result.warnings,
+            )
             return result
 
     def _parse_llm_json(

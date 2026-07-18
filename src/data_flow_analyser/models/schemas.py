@@ -215,7 +215,7 @@ class DeclaredDataCategory(BaseModel):
 
     category: DataCategoryType
     description: str
-    examples_given: List[str] = []
+    examples_given: List[str] = Field(default_factory=list)
     citation_excerpt: str  # Verbatim quote from policy for human-in-the-loop verification
 
 
@@ -257,6 +257,7 @@ class DeclaredStorageItem(BaseModel):
 
 
 class StorageClassificationType(str, Enum):
+    UNKNOWN = "unknown"
     DOCUMENTED = "documented"
     UNDOCUMENTED = "undocumented"
     EXCESSIVE_LIFESPAN = "excessive_lifespan"
@@ -278,12 +279,14 @@ class DocumentAnalysisResult(BaseModel):
     """Structured legal audit extractions from Privacy Policies, DPAs, or Cookie Policies."""
 
     document_title: str
-    declared_categories: List[DeclaredDataCategory] = []
-    declared_subprocessors: List[DeclaredSubprocessor] = []
-    declared_storage_items: List[DeclaredStorageItem] = []
-    international_transfer_mechanisms: List[str] = []
+    declared_categories: List[DeclaredDataCategory] = Field(default_factory=list)
+    declared_subprocessors: List[DeclaredSubprocessor] = Field(default_factory=list)
+    declared_storage_items: List[DeclaredStorageItem] = Field(default_factory=list)
+    international_transfer_mechanisms: List[str] = Field(default_factory=list)
     stated_retention_summary: Optional[str] = None
     raw_document_length: int = 0
+    analysis_status: Literal["complete", "partial", "failed"] = "complete"
+    warnings: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +294,7 @@ class DocumentAnalysisResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 class EndpointClassificationType(str, Enum):
+    UNKNOWN = "unknown"
     INTERNAL = "internal"
     DOCUMENTED_SUBPROCESSOR = "documented_subprocessor"
     UNDOCUMENTED_THIRD_PARTY = "undocumented_third_party"
@@ -367,6 +371,21 @@ class ComplianceDiscrepancy(BaseModel):
     risk_assessment: RiskAssessment
     observed_evidence: str  # example: "Plaintext email sent to api.mixpanel.com (US, IP 142.250.179.196)"
     declared_claim_quote: Optional[str] = None  # exact verbatim quote from policy or "Not declared"
+    evidence_references: List[str] = Field(default_factory=list)
+
+
+class AnalysisProvenance(BaseModel):
+    """Reproducibility metadata for one analysis execution."""
+
+    tool_version: str = "unknown"
+    model: Optional[str] = None
+    api_base: Optional[str] = None
+    temperature: Optional[float] = None
+    analysis_started_at: Optional[datetime] = None
+    analysis_finished_at: Optional[datetime] = None
+    reference_time: Optional[datetime] = None
+    input_hashes: Dict[str, str] = Field(default_factory=dict)
+    external_metadata_mode: str = "live_network_lookups"
 
 
 class FullAuditReport(BaseModel):
@@ -374,16 +393,19 @@ class FullAuditReport(BaseModel):
 
     audit_title: str
     summary: str
-    endpoint_classifications: List[EndpointClassificationResult] = []
-    storage_classifications: List[StorageClassificationResult] = []
-    fingerprint_vectors: List[FingerprintVector] = []
-    fingerprint_persistence_findings: List[FingerprintPersistenceFinding] = []
+    endpoint_classifications: List[EndpointClassificationResult] = Field(default_factory=list)
+    storage_classifications: List[StorageClassificationResult] = Field(default_factory=list)
+    fingerprint_vectors: List[FingerprintVector] = Field(default_factory=list)
+    fingerprint_persistence_findings: List[FingerprintPersistenceFinding] = Field(default_factory=list)
     fingerprint_summary: FingerprintAnalysisSummary = Field(default_factory=FingerprintAnalysisSummary)
-    observed_endpoints: List[ObservedEndpoint] = []
-    tracking_tokens: List[TrackingToken] = []
-    cookie_longevity_results: List[CookieLongevityResult] = []
-    seed_matches: List[SeedMatchEvidence] = []
-    discrepancies: List[ComplianceDiscrepancy] = []
+    observed_endpoints: List[ObservedEndpoint] = Field(default_factory=list)
+    tracking_tokens: List[TrackingToken] = Field(default_factory=list)
+    cookie_longevity_results: List[CookieLongevityResult] = Field(default_factory=list)
+    seed_matches: List[SeedMatchEvidence] = Field(default_factory=list)
+    discrepancies: List[ComplianceDiscrepancy] = Field(default_factory=list)
     total_flows_analysed: int = 0
     total_discrepancies_found: int = 0
     requires_human_verification: bool = True
+    analysis_status: Literal["complete", "partial", "failed"] = "complete"
+    warnings: List[str] = Field(default_factory=list)
+    provenance: AnalysisProvenance = Field(default_factory=AnalysisProvenance)

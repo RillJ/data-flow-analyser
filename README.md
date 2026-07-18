@@ -128,6 +128,14 @@ The risk score is `likelihood × severity`. The indicative matrix is:
 
 These levels are indications for human review, not definitive legal conclusions. The Markdown and JSON reports include the inputs, score, indicative level, potential harms, assessment basis, and a human-verification flag.
 
+LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
+
+### Reproducibility
+
+Every JSON report records the tool version, model, temperature, analysis timestamps, reference time, and SHA-256 hashes of the capture, policy documents, and seed data. Seed data are hashed rather than copied into provenance metadata. Cookie expiry calculations use the flow timestamp or the recorded analysis reference time; when neither is available, an absolute `Expires` directive is reported as having unknown lifespan instead of using the current wall-clock time.
+
+For research runs, retain the capture, policy-document versions, seed-file version, generated JSON report, generated Markdown report, and verbose log together. External DNS, GeoIP, reverse-DNS, and Tracker Radar results remain time-dependent; use cached or locally snapshotted metadata when exact replay is required.
+
 ### Debugging
 
 With `--verbose`, the exact system and user prompts sent to both LLM calls are written to the console. With `--log-file`, they can be retained for reproducibility. Because these prompts can contain complete policy documents and traffic-derived values, log files must be protected as sensitive research data.
@@ -177,6 +185,15 @@ data-flow-analyser audit \
   --capture scenarios.flows \
   --doc dpa.txt \
   --seed-file seed.json
+```
+
+The LLM temperature can be set explicitly for a run:
+
+```bash
+data-flow-analyser audit \
+  --capture scenarios.flows \
+  --doc dpa.txt \
+  --temperature 0
 ```
 
 Provide consent-event timestamps when the capture contains those phases. Timestamps must be ISO-8601 and include a timezone:

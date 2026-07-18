@@ -43,6 +43,7 @@ from data_flow_analyser.engines.risk_evaluator import assess_risk
 
 logger = logging.getLogger(__name__)
 
+
 GDPR_RECITAL_75_RISK_DEFINITION = """
 GDPR Recital 75 — Risks to the Rights and Freedoms of Natural Persons
 
@@ -138,7 +139,13 @@ Respond strictly in JSON matching this schema:
       "potential_harms": ["loss_of_control"],
       "assessment_basis": "Factual basis for the two ratings",
       "observed_evidence": "Factual description of wire observations",
-      "declared_claim_quote": "Verbatim quote from policy or 'Not declared'"
+      "declared_claim_quote": "Verbatim quote from policy or 'Not declared'",
+      "evidence_references": [
+        "flow-id-123",
+        "observed_endpoints.example.com",
+        "observed_storage_evaluations.example_cookie",
+        "fingerprint_vectors.flow-id-123"
+      ]
     }
   ]
 }
@@ -156,10 +163,12 @@ class LLMCrossReferencer:
         model: str = "gpt-5.4-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
+        temperature: float = 1.0,
     ):
         self.model = model
         self.api_key = api_key
         self.api_base = api_base
+        self.temperature = temperature
         self.storage_profiler = StorageProfiler()
 
     def cross_reference_audit(
@@ -173,6 +182,9 @@ class LLMCrossReferencer:
         fingerprint_vectors: Optional[List[FingerprintVector]] = None,
         fingerprint_persistence_findings: Optional[List[FingerprintPersistenceFinding]] = None,
         fingerprint_summary: Optional[FingerprintAnalysisSummary] = None,
+        observed_domains: Optional[List[str]] = None,
+        observed_flow_ids: Optional[List[str]] = None,
+        observed_endpoint_identifiers: Optional[List[str]] = None,
     ) -> FullAuditReport:
         """
         Executes an LLM-based technical cross-reference between observed evidence and policy claims.
@@ -246,6 +258,7 @@ class LLMCrossReferencer:
                         {"role": "user", "content": prompt_content},
                     ],
                     response_format={"type": "json_object"},
+                    temperature=self.temperature,
                     api_key=self.api_key,
                     api_base=self.api_base,
                 ),
@@ -259,6 +272,8 @@ class LLMCrossReferencer:
                     total_flows_analysed=len(flows),
                     fingerprint_vectors=fingerprint_vectors,
                     fingerprint_persistence_findings=fingerprint_persistence_findings,
+                    analysis_status="failed",
+                    warnings=["The LLM returned no response choices."],
                 )
 
             raw_json_str: Optional[str] = response.choices[0].message.content
@@ -269,9 +284,20 @@ class LLMCrossReferencer:
                     total_flows_analysed=len(flows),
                     fingerprint_vectors=fingerprint_vectors,
                     fingerprint_persistence_findings=fingerprint_persistence_findings,
+                    analysis_status="failed",
+                    warnings=["The LLM returned an empty response."],
                 )
 
-            report = self._parse_audit_report(raw_json_str, len(flows), rule_based_storage_eval)
+            report = self._parse_audit_report(
+                raw_json_str,
+                len(flows),
+                rule_based_storage_eval,
+                observed_domains=observed_domains,
+                observed_flow_ids=observed_flow_ids,
+                observed_endpoint_identifiers=observed_endpoint_identifiers,
+                observed_storage_names=[item.name for item in rule_based_storage_eval],
+                fingerprint_flow_ids=[vector.flow_id for vector in fingerprint_vectors],
+            )
             report.fingerprint_vectors = fingerprint_vectors
             report.fingerprint_persistence_findings = fingerprint_persistence_findings
             report.fingerprint_summary = fingerprint_summary
@@ -291,6 +317,8 @@ class LLMCrossReferencer:
                 total_flows_analysed=len(flows),
                 fingerprint_vectors=fingerprint_vectors,
                 fingerprint_persistence_findings=fingerprint_persistence_findings,
+                analysis_status="failed",
+                warnings=[f"Cross-reference LLM execution failed: {type(e).__name__}"],
             )
 
     def _prepare_evidence_summary(
@@ -399,18 +427,32 @@ class LLMCrossReferencer:
         raw_json_str: str,
         flow_count: int,
         fallback_storage: List[StorageClassificationResult],
+        observed_domains: Optional[List[str]] = None,
+        observed_flow_ids: Optional[List[str]] = None,
+        observed_endpoint_identifiers: Optional[List[str]] = None,
+        observed_storage_names: Optional[List[str]] = None,
+        fingerprint_flow_ids: Optional[List[str]] = None,
     ) -> FullAuditReport:
         """Parses LLM output into typed FullAuditReport schema."""
+        warnings: List[str] = []
         try:
             data = json.loads(raw_json_str)
+            if not isinstance(data, dict):
+                raise TypeError("LLM response must be a JSON object")
 
             endpoint_classifications = []
             for item in data.get("endpoint_classifications", []):
-                cls_type_str = item.get("classification", "undocumented_third_party").lower()
+                if not isinstance(item, dict):
+                    warnings.append("Skipped a non-object endpoint classification.")
+                    continue
+                cls_type_str = str(item.get("classification", "unknown")).lower()
                 try:
                     cls_type = EndpointClassificationType(cls_type_str)
                 except ValueError:
-                    cls_type = EndpointClassificationType.UNDOCUMENTED_THIRD_PARTY
+                    cls_type = EndpointClassificationType.UNKNOWN
+                    warnings.append(
+                        f"Unknown endpoint classification '{cls_type_str}' for domain '{item.get('domain', 'unknown')}'."
+                    )
 
                 endpoint_classifications.append(
                     EndpointClassificationResult(
@@ -423,17 +465,26 @@ class LLMCrossReferencer:
 
             storage_classifications = []
             for item in data.get("storage_classifications", []):
-                st_type_str = item.get("storage_type", "cookie").lower()
+                if not isinstance(item, dict):
+                    warnings.append("Skipped a non-object storage classification.")
+                    continue
+                st_type_str = str(item.get("storage_type", "cookie")).lower()
                 try:
                     st_type = StorageTechnologyType(st_type_str)
                 except ValueError:
-                    st_type = StorageTechnologyType.COOKIE
+                    st_type = StorageTechnologyType.OTHER
+                    warnings.append(
+                        f"Unknown storage technology '{st_type_str}' for item '{item.get('name', 'unknown')}'."
+                    )
 
-                cls_type_str = item.get("classification", "undocumented").lower()
+                cls_type_str = str(item.get("classification", "unknown")).lower()
                 try:
                     cls_type = StorageClassificationType(cls_type_str)
                 except ValueError:
-                    cls_type = StorageClassificationType.UNDOCUMENTED
+                    cls_type = StorageClassificationType.UNKNOWN
+                    warnings.append(
+                        f"Unknown storage classification '{cls_type_str}' for item '{item.get('name', 'unknown')}'."
+                    )
 
                 storage_classifications.append(
                     StorageClassificationResult(
@@ -445,20 +496,51 @@ class LLMCrossReferencer:
                     )
                 )
 
-            # Fallback to rule-based storage classifications if LLM returned none
-            if not storage_classifications:
-                storage_classifications = fallback_storage
+            # Deterministic storage evidence is authoritative. Preserve the
+            # complete observed set even if the LLM omits an item, and do not
+            # let a conflicting model classification overwrite the rule result.
+            if fallback_storage:
+                fallback_by_name = {item.name.lower(): item for item in fallback_storage}
+                reconciled: List[StorageClassificationResult] = []
+                seen_names: set[str] = set()
+                for item in storage_classifications:
+                    deterministic = fallback_by_name.get(item.name.lower())
+                    if deterministic:
+                        seen_names.add(item.name.lower())
+                        if item.classification != deterministic.classification:
+                            warnings.append(
+                                f"Deterministic storage classification replaced LLM classification for '{item.name}'."
+                            )
+                        reconciled.append(deterministic)
+                    else:
+                        reconciled.append(item)
+                for item in fallback_storage:
+                    if item.name.lower() not in seen_names and not any(
+                        existing.name.lower() == item.name.lower() for existing in reconciled
+                    ):
+                        reconciled.append(item)
+                storage_classifications = reconciled
 
             discrepancies = []
             for disc in data.get("discrepancies", []):
-                cat_str = disc.get("category", "undocumented_endpoint").lower()
+                if not isinstance(disc, dict):
+                    warnings.append("Skipped a non-object discrepancy.")
+                    continue
+                cat_str = str(disc.get("category", "undocumented_endpoint")).lower()
                 try:
                     cat = DiscrepancyCategory(cat_str)
                 except ValueError:
                     cat = DiscrepancyCategory.UNDOCUMENTED_ENDPOINT
+                    warnings.append(f"Unknown discrepancy category '{cat_str}'.")
 
-                likelihood = HarmLikelihood(disc["likelihood"])
-                severity = ImpactSeverity(disc["severity_impact"])
+                try:
+                    likelihood = HarmLikelihood(disc["likelihood"])
+                    severity = ImpactSeverity(disc["severity_impact"])
+                except (KeyError, ValueError, TypeError):
+                    warnings.append(
+                        f"Skipped discrepancy '{disc.get('discrepancy_id', 'unknown')}' because likelihood or severity was invalid."
+                    )
+                    continue
                 risk = assess_risk(
                     likelihood,
                     severity,
@@ -476,10 +558,32 @@ class LLMCrossReferencer:
                         risk_assessment=risk,
                         observed_evidence=disc.get("observed_evidence", ""),
                         declared_claim_quote=disc.get("declared_claim_quote"),
+                        evidence_references=self._validated_evidence_references(
+                            disc.get("evidence_references", []),
+                            observed_flow_ids,
+                            observed_domains,
+                            observed_endpoint_identifiers,
+                            observed_storage_names,
+                            fingerprint_flow_ids,
+                            warnings,
+                        ),
                     )
                 )
 
-            return FullAuditReport(
+            if observed_domains:
+                classified_domains = {item.domain.lower() for item in endpoint_classifications}
+                for domain in observed_domains:
+                    if domain.lower() not in classified_domains:
+                        endpoint_classifications.append(
+                            EndpointClassificationResult(
+                                domain=domain,
+                                classification=EndpointClassificationType.UNKNOWN,
+                                reasoning="The LLM did not return a classification for this observed endpoint.",
+                            )
+                        )
+                        warnings.append(f"Missing endpoint classification for observed domain '{domain}'.")
+
+            report = FullAuditReport(
                 audit_title=data.get("audit_title", "Technical Privacy Discrepancy Audit"),
                 summary=data.get("summary", ""),
                 endpoint_classifications=endpoint_classifications,
@@ -488,12 +592,59 @@ class LLMCrossReferencer:
                 total_flows_analysed=flow_count,
                 total_discrepancies_found=len(discrepancies),
                 requires_human_verification=True,
+                analysis_status="partial" if warnings else "complete",
+                warnings=warnings,
             )
+            return report
 
-        except (json.JSONDecodeError, KeyError, TypeError):
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
             return FullAuditReport(
                 audit_title="Technical Privacy Audit (Parsing Fallback)",
                 summary="Raw LLM output could not be fully parsed into structured JSON.",
                 storage_classifications=fallback_storage,
                 total_flows_analysed=flow_count,
+                analysis_status="failed",
+                warnings=["Raw LLM output could not be parsed into the report schema."],
             )
+
+    @staticmethod
+    def _validated_evidence_references(
+        references: Any,
+        observed_flow_ids: Optional[List[str]],
+        observed_domains: Optional[List[str]],
+        observed_endpoint_identifiers: Optional[List[str]],
+        observed_storage_names: Optional[List[str]],
+        fingerprint_flow_ids: Optional[List[str]],
+        warnings: List[str],
+    ) -> List[str]:
+        if references is None:
+            return []
+        if not isinstance(references, list):
+            warnings.append("Discrepancy evidence_references was not a list.")
+            return []
+        valid = [str(reference) for reference in references if reference]
+        if observed_flow_ids is None:
+            return valid
+        flow_ids = set(observed_flow_ids)
+        domains = set(observed_domains or [])
+        endpoint_identifiers = set(observed_endpoint_identifiers or domains)
+        storage_names = set(observed_storage_names or [])
+        fingerprint_ids = set(fingerprint_flow_ids or [])
+
+        def is_valid(reference: str) -> bool:
+            if reference in flow_ids:
+                return True
+            if reference in endpoint_identifiers:
+                return True
+            if reference.startswith("observed_endpoints."):
+                return reference.removeprefix("observed_endpoints.") in domains
+            if reference.startswith("observed_storage_evaluations."):
+                return reference.removeprefix("observed_storage_evaluations.") in storage_names
+            if reference.startswith("fingerprint_vectors."):
+                return reference.removeprefix("fingerprint_vectors.") in fingerprint_ids
+            return False
+
+        unknown = [reference for reference in valid if not is_valid(reference)]
+        if unknown:
+            warnings.append(f"Removed unknown evidence references: {', '.join(unknown)}.")
+        return [reference for reference in valid if is_valid(reference)]

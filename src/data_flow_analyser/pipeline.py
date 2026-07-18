@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
@@ -29,6 +31,7 @@ from data_flow_analyser.engines.seed_hasher import (
     scan_for_seed_matches,
 )
 from data_flow_analyser.models.schemas import (
+    AnalysisProvenance,
     CookieLongevityResult,
     FingerprintPersistenceFinding,
     FingerprintAnalysisSummary,
@@ -40,6 +43,7 @@ from data_flow_analyser.models.schemas import (
     SeedMatchEvidence,
     TrackingToken,
 )
+from data_flow_analyser import __version__
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
 
 logger = logging.getLogger("data_flow_analyser.pipeline")
@@ -57,15 +61,21 @@ class AuditPipeline:
         llm_model: str = "gpt-5.4-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
+        temperature: float = 0.0,
     ):
         self.doc_ingestor = PolicyDocumentIngestor(
-            model=llm_model, api_key=api_key, api_base=api_base
+            model=llm_model, api_key=api_key, api_base=api_base,
+            temperature=temperature,
         )
         self.cross_referencer = LLMCrossReferencer(
-            model=llm_model, api_key=api_key, api_base=api_base
+            model=llm_model, api_key=api_key, api_base=api_base,
+            temperature=temperature,
         )
         self.endpoint_profiler = EndpointProfiler()
         self.fingerprint_profiler = FingerprintProfiler()
+        self.llm_model = llm_model
+        self.api_base = api_base
+        self.temperature = temperature
 
     def run(
         self,
@@ -81,7 +91,7 @@ class AuditPipeline:
         Args:
             flow_file_path: Path to a mitmproxy flow dump or HAR capture file.
             documents: Single file path, text string, or sequence/list of file paths/texts.
-            seed_data: User PII key-value pairs or pre-computed SeedData.
+            seed_data: User personal data key-value pairs or pre-computed SeedData.
             consent_granted_at: Optional timestamp at which the user gave consent.
             consent_withdrawn_at: Optional timestamp at which the user withdrew consent.
 
@@ -96,6 +106,7 @@ class AuditPipeline:
         if not target_docs:
             raise ValueError("Must provide at least one document or text input.")
         self._validate_consent_timeline(consent_granted_at, consent_withdrawn_at)
+        analysis_started_at = datetime.now(timezone.utc)
 
         path_str = str(target_flow_path)
         logger.info(f"Loading and parsing network capture file: {path_str}")
@@ -134,7 +145,10 @@ class AuditPipeline:
         cookie_results: List[CookieLongevityResult] = []
 
         for flow in flows:
-            tokens, cookies = analyse_flow_identifiers(flow)
+            tokens, cookies = analyse_flow_identifiers(
+                flow,
+                reference_time=analysis_started_at,
+            )
             entropy_tokens.extend(tokens)
             cookie_results.extend(cookies)
             logger.debug(
@@ -186,6 +200,14 @@ class AuditPipeline:
             fingerprint_vectors=fingerprint_vectors,
             fingerprint_persistence_findings=fingerprint_findings,
             fingerprint_summary=fingerprint_summary,
+            observed_domains=[endpoint.domain for endpoint in endpoints],
+            observed_flow_ids=[flow.flow_id for flow in flows],
+            observed_endpoint_identifiers=[
+                identifier
+                for endpoint in endpoints
+                for identifier in (endpoint.domain, endpoint.ip_address)
+                if identifier
+            ],
         )
         # Preserve deterministic evidence in the report independently of LLM success.
         report.fingerprint_vectors = fingerprint_vectors
@@ -195,9 +217,63 @@ class AuditPipeline:
         report.tracking_tokens = entropy_tokens
         report.cookie_longevity_results = cookie_results
         report.seed_matches = [SeedMatchEvidence(**match) for match in seed_matches]
+        if doc_analysis.warnings:
+            report.warnings = doc_analysis.warnings + report.warnings
+        if doc_analysis.analysis_status == "failed":
+            report.analysis_status = "failed"
+        elif doc_analysis.analysis_status == "partial" and report.analysis_status == "complete":
+            report.analysis_status = "partial"
+        report.provenance = AnalysisProvenance(
+            tool_version=__version__,
+            model=self.llm_model,
+            api_base=self.api_base,
+            temperature=self.temperature,
+            analysis_started_at=analysis_started_at,
+            analysis_finished_at=datetime.now(timezone.utc),
+            reference_time=analysis_started_at,
+            input_hashes=self._input_hashes(target_flow_path, target_docs, seed_data),
+        )
 
         logger.info(f"Audit completed. Found {report.total_discrepancies_found} discrepancies.")
         return report
+
+    @staticmethod
+    def _sha256_bytes(value: bytes) -> str:
+        return hashlib.sha256(value).hexdigest()
+
+    @classmethod
+    def _input_hashes(
+        cls,
+        flow_file_path: Union[str, Path],
+        documents: Union[str, Path, Sequence[Union[str, Path]]],
+        seed_data: Optional[Union[SeedData, Dict[str, str]]],
+    ) -> Dict[str, str]:
+        """Create non-sensitive hashes for the inputs used by an analysis."""
+        hashes: Dict[str, str] = {}
+        capture_path = Path(flow_file_path)
+        if capture_path.is_file():
+            hashes["capture"] = cls._sha256_bytes(capture_path.read_bytes())
+
+        doc_list = [documents] if isinstance(documents, (str, Path)) else list(documents)
+        for index, document in enumerate(doc_list, start=1):
+            if isinstance(document, Path) or (isinstance(document, str) and Path(document).is_file()):
+                document_path = Path(document)
+                content = document_path.read_bytes()
+                name = document_path.name
+            else:
+                content = str(document).encode("utf-8")
+                name = f"inline-{index}"
+            hashes[f"document:{index}:{name}"] = cls._sha256_bytes(content)
+
+        if seed_data:
+            if isinstance(seed_data, SeedData):
+                serialised = seed_data.model_dump(mode="json")
+            else:
+                serialised = seed_data
+            hashes["seed_data"] = cls._sha256_bytes(
+                json.dumps(serialised, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            )
+        return hashes
 
     @staticmethod
     def _summarize_fingerprints(

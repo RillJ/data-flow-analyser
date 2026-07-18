@@ -133,6 +133,8 @@ def test_pipeline_execution(
     assert report.total_flows_analysed == 1
     assert report.total_discrepancies_found == 1
     assert report.discrepancies[0].discrepancy_id == "DISC-001"
+    assert report.provenance.model == "gpt-5.4-mini"
+    assert "capture" in report.provenance.input_hashes
     
     # Verify storage classifications were evaluated and included
     assert len(report.storage_classifications) == 1

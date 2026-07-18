@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from unittest.mock import patch
+
 from data_flow_analyser.engines.document_ingestor import PolicyDocumentIngestor
 from data_flow_analyser.models.schemas import DataCategoryType, StorageTechnologyType
 
@@ -74,3 +76,13 @@ def test_parse_llm_json_response_with_storage_items():
     local_storage = result.declared_storage_items[1]
     assert local_storage.name == "app_user_settings"
     assert local_storage.storage_type == StorageTechnologyType.LOCAL_STORAGE
+
+
+@patch("data_flow_analyser.engines.document_ingestor.completion")
+def test_document_llm_failure_returns_structured_failure_without_secondary_error(mock_completion):
+    mock_completion.side_effect = RuntimeError("provider unavailable")
+
+    result = PolicyDocumentIngestor().analyse_document_text("Privacy policy text")
+
+    assert result.analysis_status == "failed"
+    assert result.warnings == ["Document LLM execution failed: RuntimeError"]

@@ -17,6 +17,7 @@ from data_flow_analyser.engines.entropy import (
     parse_set_cookie_longevity,
     extract_high_entropy_tokens,
 )
+from datetime import datetime, timezone
 
 
 def test_shannon_entropy_calculation():
@@ -64,3 +65,16 @@ def test_cookie_longevity_short_lived():
 
     assert len(results) == 1
     assert results[0].is_excessive_longevity is False
+
+
+def test_cookie_expiry_requires_explicit_reference_time():
+    header = "tracking_id=xyz123; Expires=Wed, 01 Apr 2026 00:00:00 GMT; Path=/"
+
+    without_reference = parse_set_cookie_longevity(header)
+    assert without_reference[0].lifespan_days is None
+
+    with_reference = parse_set_cookie_longevity(
+        header,
+        reference_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    assert with_reference[0].lifespan_days == 90.0

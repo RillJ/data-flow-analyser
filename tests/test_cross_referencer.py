@@ -167,3 +167,130 @@ def test_parse_audit_report_storage_fallback():
         report.storage_classifications[0].classification
         == StorageClassificationType.UNDOCUMENTED
     )
+
+
+def test_parse_report_surfaces_unknowns_and_keeps_evidence_references():
+    referencer = LLMCrossReferencer()
+    report = referencer._parse_audit_report(
+        """
+        {
+          "audit_title": "Audit",
+          "summary": "Partial model output",
+          "endpoint_classifications": [
+            {"domain": "known.example", "classification": "not_a_real_classification", "reasoning": "uncertain"}
+          ],
+          "discrepancies": [
+            {
+              "discrepancy_id": "DISC-001",
+              "title": "Unknown endpoint",
+              "category": "undocumented_endpoint",
+              "likelihood": "reasonable_possibility",
+              "severity_impact": "some_impact",
+              "potential_harms": [],
+              "assessment_basis": "Observed evidence.",
+              "observed_evidence": "Flow flow-1 sent data.",
+              "evidence_references": ["flow-1", "not-observed"]
+            }
+          ]
+        }
+        """,
+        flow_count=1,
+        fallback_storage=[],
+        observed_domains=["known.example", "missing.example"],
+        observed_flow_ids=["flow-1"],
+    )
+
+    assert report.analysis_status == "partial"
+    assert report.discrepancies[0].evidence_references == ["flow-1"]
+    assert any(item.domain == "missing.example" for item in report.endpoint_classifications)
+    assert any("unknown evidence references" in warning.lower() for warning in report.warnings)
+
+
+def test_parse_report_accepts_typed_evidence_references():
+    referencer = LLMCrossReferencer()
+    report = referencer._parse_audit_report(
+        """
+        {
+          "audit_title": "Audit",
+          "summary": "Evidence references",
+          "endpoint_classifications": [
+            {
+              "domain": "example.com",
+              "classification": "internal",
+              "reasoning": "Observed endpoint."
+            }
+          ],
+          "discrepancies": [
+            {
+              "discrepancy_id": "DISC-001",
+              "title": "Observed evidence",
+              "category": "undocumented_endpoint",
+              "likelihood": "remote",
+              "severity_impact": "minimal_impact",
+              "potential_harms": [],
+              "assessment_basis": "Observed evidence.",
+              "observed_evidence": "Several evidence objects were relevant.",
+              "evidence_references": [
+                "flow-1",
+                "observed_endpoints.example.com",
+                "observed_storage_evaluations.nc_form_fields",
+                "fingerprint_vectors.flow-1"
+              ]
+            }
+          ]
+        }
+        """,
+        flow_count=1,
+        fallback_storage=[
+            StorageClassificationResult(
+                name="nc_form_fields",
+                classification=StorageClassificationType.UNDOCUMENTED,
+                reasoning="Observed but not declared.",
+            )
+        ],
+        observed_domains=["example.com"],
+        observed_flow_ids=["flow-1"],
+        observed_endpoint_identifiers=["example.com", "203.0.113.10"],
+        observed_storage_names=["nc_form_fields"],
+        fingerprint_flow_ids=["flow-1"],
+    )
+
+    assert report.discrepancies[0].evidence_references == [
+        "flow-1",
+        "observed_endpoints.example.com",
+        "observed_storage_evaluations.nc_form_fields",
+        "fingerprint_vectors.flow-1",
+    ]
+    assert report.warnings == []
+
+
+def test_parse_report_accepts_bare_endpoint_domain_and_ip_references():
+    report = LLMCrossReferencer()._parse_audit_report(
+        """
+        {
+          "audit_title": "Audit",
+          "summary": "Bare endpoint references",
+          "discrepancies": [
+            {
+              "discrepancy_id": "DISC-001",
+              "title": "Endpoint evidence",
+              "category": "undocumented_endpoint",
+              "likelihood": "remote",
+              "severity_impact": "minimal_impact",
+              "observed_evidence": "Endpoint evidence.",
+              "evidence_references": ["example.com", "203.0.113.10"]
+            }
+          ]
+        }
+        """,
+        flow_count=1,
+        fallback_storage=[],
+        observed_flow_ids=["flow-1"],
+        observed_endpoint_identifiers=["example.com", "203.0.113.10"],
+    )
+
+    assert report.discrepancies[0].evidence_references == [
+        "example.com",
+        "203.0.113.10",
+    ]
+    assert report.warnings == []

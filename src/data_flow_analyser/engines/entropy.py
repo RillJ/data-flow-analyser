@@ -61,7 +61,8 @@ def calculate_shannon_entropy(text: str) -> float:
 
 def parse_set_cookie_longevity(
     set_cookie_header: str,
-    flow_timestamp: Optional[datetime] = None
+    flow_timestamp: Optional[datetime] = None,
+    reference_time: Optional[datetime] = None,
 ) -> List[CookieLongevityResult]:
     """
     Parses Set-Cookie directives to calculate cookie lifespan and flag long-lived cookies (> 90 days).
@@ -70,9 +71,10 @@ def parse_set_cookie_longevity(
     if not set_cookie_header:
         return results
 
-    reference_time = flow_timestamp or datetime.now(timezone.utc)
-    if reference_time.tzinfo is None:
-        reference_time = reference_time.replace(tzinfo=timezone.utc)
+    # Prefer the capture timestamp.  If it is unavailable, use the explicit analysis reference time.  
+    effective_reference_time = flow_timestamp or reference_time
+    if effective_reference_time and effective_reference_time.tzinfo is None:
+        effective_reference_time = effective_reference_time.replace(tzinfo=timezone.utc)
 
     directives = [d.strip() for d in set_cookie_header.split(";") if d.strip()]
     if not directives:
@@ -108,9 +110,10 @@ def parse_set_cookie_longevity(
                     expires_dt = parsedate_to_datetime(d_val)
                     if expires_dt.tzinfo is None:
                         expires_dt = expires_dt.replace(tzinfo=timezone.utc)
-                    delta = expires_dt - reference_time
-                    max_age_seconds = int(delta.total_seconds())
-                    lifespan_days = round(max_age_seconds / (24 * 3600), 2)
+                    if effective_reference_time:
+                        delta = expires_dt - effective_reference_time
+                        max_age_seconds = int(delta.total_seconds())
+                        lifespan_days = round(max_age_seconds / (24 * 3600), 2)
                 except Exception:
                     pass
 
@@ -179,7 +182,8 @@ def extract_high_entropy_tokens(
 def analyse_flow_identifiers(
     flow: NetworkFlow,
     entropy_threshold: float = 3.5,
-    min_length: int = 8
+    min_length: int = 8,
+    reference_time: Optional[datetime] = None,
 ) -> Tuple[List[TrackingToken], List[CookieLongevityResult]]:
     """
     Scans a NetworkFlow's query parameters, cookies, and payload for dynamic tracking
@@ -230,7 +234,11 @@ def analyse_flow_identifiers(
     set_cookie_val = flow.response_headers.get("Set-Cookie") or flow.response_headers.get("set-cookie")
     if set_cookie_val:
         cookie_longevity_results.extend(
-            parse_set_cookie_longevity(set_cookie_val, flow.timestamp)
+            parse_set_cookie_longevity(
+                set_cookie_val,
+                flow.timestamp,
+                reference_time=reference_time,
+            )
         )
 
     # Inspect request body
