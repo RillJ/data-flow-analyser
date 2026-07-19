@@ -101,6 +101,9 @@ def _to_network_flow(flow: HTTPFlow) -> NetworkFlow:
         cookies_set=_parse_cookie_headers(
             response.headers.get_all("set-cookie") if response is not None else []
         ),
+        cookies_set_domain_attributes=_parse_cookie_domain_attributes(
+            response.headers.get_all("set-cookie") if response is not None else []
+        ),
     )
     logger.debug("HTTP flow converted: host=%s method=%s path=%s request_body_chars=%d response_status=%s cookies_sent=%d cookies_set=%d", network_flow.host, network_flow.method, network_flow.path, len(network_flow.request_body or ""), network_flow.response_status, len(network_flow.cookies_sent), len(network_flow.cookies_set))
     return network_flow
@@ -142,3 +145,18 @@ def _parse_cookie_headers(headers: List[str]) -> Dict[str, str]:
             continue
         cookies.update({name: morsel.value for name, morsel in parsed.items()})
     return cookies
+
+
+def _parse_cookie_domain_attributes(headers: List[str]) -> Dict[str, str]:
+    """Extract optional Domain attributes from Set-Cookie headers."""
+    domains: Dict[str, str] = {}
+    for header in headers:
+        parsed = SimpleCookie()
+        try:
+            parsed.load(header)
+        except (TypeError, ValueError):
+            continue
+        for name, morsel in parsed.items():
+            if morsel["domain"]:
+                domains[name] = morsel["domain"]
+    return domains

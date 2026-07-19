@@ -12,22 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .schemas import (
-    NetworkFlow,
-    ObservedEndpoint,
-    PolicyStatement,
-    PrivacyDiscrepancy,
-    RiskComponents,
-    PersonalDataFlowEvidence,
-    SeedData,
-)
+import json
 
-__all__ = [
-    "NetworkFlow",
-    "ObservedEndpoint",
-    "PolicyStatement",
-    "PrivacyDiscrepancy",
-    "RiskComponents",
-    "SeedData",
-    "PersonalDataFlowEvidence",
-]
+from data_flow_analyser.exporter import ReportExporter
+from data_flow_analyser.models.schemas import FullAuditReport
+
+
+def test_json_export_handles_lone_unicode_surrogates(tmp_path):
+    report = FullAuditReport(audit_title="Audit", summary="bad\udcfa")
+    output = tmp_path / "report.json"
+
+    ReportExporter.to_json_file(report, output)
+
+    exported = json.loads(output.read_text(encoding="utf-8"))
+    assert exported["summary"] == r"bad\udcfa"

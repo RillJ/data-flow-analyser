@@ -31,7 +31,7 @@ from data_flow_analyser.models.schemas import (
     FingerprintPersistenceFinding,
     FingerprintVector,
     FingerprintAnalysisSummary,
-    SeedMatchEvidence,
+    PersonalDataFlowEvidence,
     NetworkFlow,
     ObservedEndpoint,
     StorageClassificationResult,
@@ -80,7 +80,6 @@ You must produce an auditable report evaluating:
 
 3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. Look for:
    - Undocumented endpoints receiving data.
-   - Personal data transmission (plaintext or hashed) sent to third parties or without consent.
    - Data collection exceeding stated categories (like: ACCOUNT_DATA sent to DIAGNOSTIC_DATA endpoints).
    - Cookies or LocalStorage keys observed but unannounced, or with actual lifespans exceeding declared durations.
    - International data transfers to third countries (like: US) without disclosed transfer safeguards.
@@ -123,6 +122,7 @@ Respond strictly in JSON matching this schema:
   "storage_classifications": [
     {
       "name": "_ga",
+      "domains": ["analytics.example.com"],
       "storage_type": "cookie|local_storage|session_storage|pixel_beacon|indexed_db|other",
       "observed_lifespan_days": 730.0,
       "classification": "documented|undocumented|excessive_lifespan|purpose_mismatch",
@@ -133,7 +133,7 @@ Respond strictly in JSON matching this schema:
     {
       "discrepancy_id": "DISC-001",
       "title": "Short descriptive title",
-      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|plaintext_personal_data_leak|fingerprinting_candidate|fingerprinting_after_withdrawal",
+      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|fingerprinting_candidate|fingerprinting_after_withdrawal",
       "likelihood": "remote|reasonable_possibility|more_likely_than_not",
       "severity_impact": "minimal_impact|some_impact|serious_harm",
       "potential_harms": ["loss_of_control"],
@@ -176,7 +176,7 @@ class LLMCrossReferencer:
         doc_analysis: DocumentAnalysisResult,
         flows: List[NetworkFlow],
         endpoints: List[ObservedEndpoint],
-        seed_matches: Optional[List[Dict[str, Any]]] = None,
+        personal_data_flows: Optional[List[PersonalDataFlowEvidence]] = None,
         entropy_tokens: Optional[List[TrackingToken]] = None,
         cookie_results: Optional[List[CookieLongevityResult]] = None,
         fingerprint_vectors: Optional[List[FingerprintVector]] = None,
@@ -189,13 +189,13 @@ class LLMCrossReferencer:
         """
         Executes an LLM-based technical cross-reference between observed evidence and policy claims.
         """
-        seed_matches = seed_matches or []
+        personal_data_flows = personal_data_flows or []
         entropy_tokens = entropy_tokens or []
         cookie_results = cookie_results or []
         fingerprint_vectors = fingerprint_vectors or []
         fingerprint_persistence_findings = fingerprint_persistence_findings or []
         fingerprint_summary = fingerprint_summary or FingerprintAnalysisSummary()
-        logger.debug("Cross-reference started: flows=%d endpoints=%d seed_matches=%d tokens=%d cookie_records=%d fingerprint_vectors=%d phase_findings=%d", len(flows), len(endpoints), len(seed_matches), len(entropy_tokens), len(cookie_results), len(fingerprint_vectors), len(fingerprint_persistence_findings))
+        logger.debug("Cross-reference started: flows=%d endpoints=%d personal_data_groups=%d tokens=%d cookie_records=%d fingerprint_vectors=%d phase_findings=%d", len(flows), len(endpoints), len(personal_data_flows), len(entropy_tokens), len(cookie_results), len(fingerprint_vectors), len(fingerprint_persistence_findings))
 
         # Run rule-based storage profiling first to reconcile observed storage against policy
         rule_based_storage_eval = self.storage_profiler.reconcile_storage(
@@ -207,14 +207,14 @@ class LLMCrossReferencer:
         evidence_summary = self._prepare_evidence_summary(
             flows,
             endpoints,
-            seed_matches,
+            personal_data_flows,
             entropy_tokens,
             cookie_results,
             rule_based_storage_eval,
             fingerprint_vectors,
             fingerprint_persistence_findings,
         )
-        logger.debug("Evidence summary prepared: endpoints=%d seed_leaks=%d entropy_tokens=%d storage_items=%d fingerprint_vectors=%d phase_findings=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_seed_leaks"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]), len(evidence_summary["fingerprint_vectors"]), len(evidence_summary["fingerprint_consent_phase_findings"]))
+        logger.debug("Evidence summary prepared: endpoints=%d personal_data_groups=%d entropy_tokens=%d storage_items=%d fingerprint_vectors=%d phase_findings=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_flow_mapping"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]), len(evidence_summary["fingerprint_vectors"]), len(evidence_summary["fingerprint_consent_phase_findings"]))
 
         document_context = doc_analysis.model_dump(mode="json")
 
@@ -297,6 +297,16 @@ class LLMCrossReferencer:
                 observed_endpoint_identifiers=observed_endpoint_identifiers,
                 observed_storage_names=[item.name for item in rule_based_storage_eval],
                 fingerprint_flow_ids=[vector.flow_id for vector in fingerprint_vectors],
+                personal_data_mapping_identifiers={evidence.endpoint for evidence in personal_data_flows},
+                entropy_identifiers={
+                    identifier
+                    for token in entropy_tokens
+                    for identifier in (
+                        token.endpoint,
+                        f"{token.endpoint}.{token.location}" if token.endpoint else None,
+                    )
+                    if identifier
+                },
             )
             report.fingerprint_vectors = fingerprint_vectors
             report.fingerprint_persistence_findings = fingerprint_persistence_findings
@@ -304,7 +314,7 @@ class LLMCrossReferencer:
             report.observed_endpoints = endpoints
             report.tracking_tokens = entropy_tokens
             report.cookie_longevity_results = cookie_results
-            report.seed_matches = [SeedMatchEvidence(**match) for match in seed_matches]
+            report.personal_data_flows = personal_data_flows
             logger.debug("Cross-reference report parsed: endpoint_results=%d storage_results=%d discrepancies=%d", len(report.endpoint_classifications), len(report.storage_classifications), len(report.discrepancies))
             return report
 
@@ -325,7 +335,7 @@ class LLMCrossReferencer:
         self,
         flows: List[NetworkFlow],
         endpoints: List[ObservedEndpoint],
-        seed_matches: List[Dict[str, Any]],
+        personal_data_flows: List[PersonalDataFlowEvidence],
         entropy_tokens: List[TrackingToken],
         cookie_results: List[CookieLongevityResult],
         storage_evaluations: List[StorageClassificationResult],
@@ -347,46 +357,66 @@ class LLMCrossReferencer:
             for ep in endpoints
         ]
 
-        seed_summary = []
-        for match in seed_matches:
-            if isinstance(match, dict):
-                seed_summary.append(
-                    {
-                        "matched_value": match.get("matched_value")
-                        or match.get("raw_value")
-                        or match.get("value"),
-                        "type": match.get("field_type")
-                        or match.get("key")
-                        or match.get("type", "unknown"),
-                        "location": match.get("location") or match.get("found_in", "unknown"),
-                        "is_hashed": match.get("is_hashed", False),
-                    }
-                )
-            else:
-                seed_summary.append(
-                    {
-                        "matched_value": getattr(
-                            match, "matched_value", getattr(match, "raw_value", str(match))
-                        ),
-                        "type": getattr(match, "field_type", getattr(match, "key", "unknown")),
-                        "location": getattr(match, "location", "unknown"),
-                        "is_hashed": getattr(match, "is_hashed", False),
-                    }
-                )
+        flow_data_summary = [
+            {
+                "endpoint": evidence.endpoint,
+                "direction": evidence.direction,
+                "location": evidence.location,
+                "data_label": evidence.data_label,
+                "sample_value": evidence.sample_value,
+                "representation": evidence.representation,
+                "count": evidence.count,
+            }
+            for evidence in personal_data_flows
+        ]
+
+        # Entropy is not a personal-data classifier. Give the LLM only the
+        # aggregate identifier signal: where it occurs, how many distinct
+        # candidates were seen, recurrence, and entropy range. Raw tokens are
+        # retained in the JSON report but are deliberately excluded here.
+        entropy_groups: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for token in entropy_tokens:
+            key = (token.endpoint or "unknown", token.location)
+            group = entropy_groups.setdefault(
+                key,
+                {
+                    "endpoint": token.endpoint or "unknown",
+                    "location": token.location,
+                    "distinct_token_count": 0,
+                    "total_occurrences": 0,
+                    "reused_token_count": 0,
+                    "flow_ids": set(),
+                    "min_entropy": token.entropy,
+                    "max_entropy": token.entropy,
+                },
+            )
+            group["distinct_token_count"] += 1
+            group["total_occurrences"] += token.occurrences
+            group["reused_token_count"] += int(token.occurrences > 1)
+            group["flow_ids"].update(token.flow_ids)
+            group["min_entropy"] = min(group["min_entropy"], token.entropy)
+            group["max_entropy"] = max(group["max_entropy"], token.entropy)
 
         entropy_summary = [
             {
-                "token": tok.token[:16] + "..." if len(tok.token) > 16 else tok.token,
-                "location": tok.location,
-                "entropy": tok.entropy,
-                "occurrences": tok.occurrences,
+                "endpoint": group["endpoint"],
+                "location": group["location"],
+                "distinct_token_count": group["distinct_token_count"],
+                "total_occurrences": group["total_occurrences"],
+                "reused_token_count": group["reused_token_count"],
+                "flow_count": len(group["flow_ids"]),
+                "min_entropy": round(group["min_entropy"], 4),
+                "max_entropy": round(group["max_entropy"], 4),
+                "interpretation": "candidate identifier signal; not proof of personal data",
             }
-            for tok in entropy_tokens
+            for group in entropy_groups.values()
         ]
 
         storage_summary = [
             {
                 "name": item.name,
+                "domains": item.domains,
+                "cookie_domain_attributes": item.cookie_domain_attributes,
                 "type": item.storage_type.value,
                 "observed_lifespan_days": item.observed_lifespan_days,
                 "classification": item.classification.value,
@@ -415,7 +445,7 @@ class LLMCrossReferencer:
 
         return {
             "observed_endpoints": endpoint_summary,
-            "personal_data_seed_leaks": seed_summary,
+            "personal_data_flow_mapping": flow_data_summary,
             "high_entropy_tokens": entropy_summary,
             "observed_storage_evaluations": storage_summary,
             "fingerprint_vectors": fingerprint_summary,
@@ -432,6 +462,8 @@ class LLMCrossReferencer:
         observed_endpoint_identifiers: Optional[List[str]] = None,
         observed_storage_names: Optional[List[str]] = None,
         fingerprint_flow_ids: Optional[List[str]] = None,
+        personal_data_mapping_identifiers: Optional[set[str]] = None,
+        entropy_identifiers: Optional[set[str]] = None,
     ) -> FullAuditReport:
         """Parses LLM output into typed FullAuditReport schema."""
         warnings: List[str] = []
@@ -489,6 +521,8 @@ class LLMCrossReferencer:
                 storage_classifications.append(
                     StorageClassificationResult(
                         name=item.get("name", "unknown"),
+                        domains=item.get("domains", ([item["domain"]] if item.get("domain") else [])),
+                        cookie_domain_attributes=item.get("cookie_domain_attributes", []),
                         storage_type=st_type,
                         observed_lifespan_days=item.get("observed_lifespan_days"),
                         classification=cls_type,
@@ -565,6 +599,8 @@ class LLMCrossReferencer:
                             observed_endpoint_identifiers,
                             observed_storage_names,
                             fingerprint_flow_ids,
+                            personal_data_mapping_identifiers,
+                            entropy_identifiers,
                             warnings,
                         ),
                     )
@@ -615,6 +651,8 @@ class LLMCrossReferencer:
         observed_endpoint_identifiers: Optional[List[str]],
         observed_storage_names: Optional[List[str]],
         fingerprint_flow_ids: Optional[List[str]],
+        personal_data_mapping_identifiers: Optional[set[str]],
+        entropy_identifiers: Optional[set[str]],
         warnings: List[str],
     ) -> List[str]:
         if references is None:
@@ -630,6 +668,8 @@ class LLMCrossReferencer:
         endpoint_identifiers = set(observed_endpoint_identifiers or domains)
         storage_names = set(observed_storage_names or [])
         fingerprint_ids = set(fingerprint_flow_ids or [])
+        personal_data_ids = set(personal_data_mapping_identifiers or [])
+        entropy_ids = set(entropy_identifiers or [])
 
         def is_valid(reference: str) -> bool:
             if reference in flow_ids:
@@ -642,6 +682,10 @@ class LLMCrossReferencer:
                 return reference.removeprefix("observed_storage_evaluations.") in storage_names
             if reference.startswith("fingerprint_vectors."):
                 return reference.removeprefix("fingerprint_vectors.") in fingerprint_ids
+            if reference.startswith("personal_data_flow_mapping."):
+                return reference.removeprefix("personal_data_flow_mapping.") in personal_data_ids
+            if reference.startswith("high_entropy_tokens."):
+                return reference.removeprefix("high_entropy_tokens.") in entropy_ids
             return False
 
         unknown = [reference for reference in valid if not is_valid(reference)]

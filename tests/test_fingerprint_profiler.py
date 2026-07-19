@@ -79,3 +79,13 @@ def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
 def test_consent_phase_is_unknown_without_user_supplied_events():
     timestamp = datetime(2026, 6, 27, tzinfo=timezone.utc)
     assert classify_consent_phase(timestamp) == ConsentPhase.UNKNOWN
+
+
+def test_fingerprint_signature_handles_lone_unicode_surrogates():
+    profiler = FingerprintProfiler()
+    flow = _flow("flow-malformed-unicode", datetime(2026, 6, 27, tzinfo=timezone.utc))
+    flow.request_headers["User-Agent"] = "ExampleBrowser/1.0\udcfa"
+
+    vector = profiler.analyse_flow(flow, ConsentPhase.UNKNOWN)
+
+    assert len(vector.signature) == 64

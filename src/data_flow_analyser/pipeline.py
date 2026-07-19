@@ -40,11 +40,12 @@ from data_flow_analyser.models.schemas import (
     NetworkFlow,
     ObservedEndpoint,
     SeedData,
-    SeedMatchEvidence,
+    PersonalDataFlowEvidence,
     TrackingToken,
 )
 from data_flow_analyser import __version__
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
+from data_flow_analyser.parsers.decoder import recursive_decode
 
 logger = logging.getLogger("data_flow_analyser.pipeline")
 
@@ -136,9 +137,13 @@ class AuditPipeline:
 
         # Personal data seed matching
         seed_matches: List[Dict[str, Any]] = self._scan_seed_matches(flows, seed_data)
+        personal_data_flows = self._group_personal_data_flows(seed_matches)
         if seed_matches:
-            logger.info(f"Detected {len(seed_matches)} personal data seed occurrences in network flows.")
-        logger.debug("Seed matching complete: %d matches", len(seed_matches))
+            logger.info(
+                "Detected %d personal-data occurrences, grouped into %d evidence records.",
+                len(seed_matches), len(personal_data_flows),
+            )
+        logger.debug("Seed matching complete: occurrences=%d groups=%d", len(seed_matches), len(personal_data_flows))
 
         # Entropy tokens & cookie longevity
         entropy_tokens: List[TrackingToken] = []
@@ -149,6 +154,12 @@ class AuditPipeline:
                 flow,
                 reference_time=analysis_started_at,
             )
+            tokens = [
+                token.model_copy(
+                    update={"endpoint": flow.host, "flow_ids": [flow.flow_id]}
+                )
+                for token in tokens
+            ]
             entropy_tokens.extend(tokens)
             cookie_results.extend(cookies)
             logger.debug(
@@ -194,7 +205,7 @@ class AuditPipeline:
             doc_analysis=doc_analysis,
             flows=flows,
             endpoints=endpoints,
-            seed_matches=seed_matches,
+            personal_data_flows=personal_data_flows,
             entropy_tokens=entropy_tokens,
             cookie_results=cookie_results,
             fingerprint_vectors=fingerprint_vectors,
@@ -216,7 +227,7 @@ class AuditPipeline:
         report.observed_endpoints = endpoints
         report.tracking_tokens = entropy_tokens
         report.cookie_longevity_results = cookie_results
-        report.seed_matches = [SeedMatchEvidence(**match) for match in seed_matches]
+        report.personal_data_flows = personal_data_flows
         if doc_analysis.warnings:
             report.warnings = doc_analysis.warnings + report.warnings
         if doc_analysis.analysis_status == "failed":
@@ -302,11 +313,14 @@ class AuditPipeline:
         tokens: List[TrackingToken],
     ) -> List[TrackingToken]:
         """Collapse repeated entropy findings while retaining occurrence counts."""
-        aggregated: Dict[tuple[str, str], TrackingToken] = {}
+        aggregated: Dict[tuple[str, str, Optional[str]], TrackingToken] = {}
         for token in tokens:
-            key = (token.token, token.location)
+            key = (token.token, token.location, token.endpoint)
             if key in aggregated:
                 aggregated[key].occurrences += token.occurrences
+                for flow_id in token.flow_ids:
+                    if flow_id not in aggregated[key].flow_ids:
+                        aggregated[key].flow_ids.append(flow_id)
             else:
                 aggregated[key] = token.model_copy()
         return list(aggregated.values())
@@ -378,7 +392,7 @@ class AuditPipeline:
         flows: List[NetworkFlow],
         seed_input: Optional[Union[SeedData, Dict[str, str]]],
     ) -> List[Dict[str, Any]]:
-        """Pre-computes personal data seed lookup map and scans flow headers, URLs, and bodies."""
+        """Scan decoded request and response evidence and retain its flow mapping."""
         if not seed_input:
             return []
 
@@ -391,29 +405,83 @@ class AuditPipeline:
 
         for flow in flows:
             targets = [
-                ("url", flow.url),
-                ("request_headers", flow.request_headers),
-                ("request_body", flow.request_body),
-                ("cookies_sent", flow.cookies_sent),
+                ("request", "url", flow.url),
+                ("request", "headers", flow.request_headers),
+                ("request", "body", flow.request_body),
+                ("request", "cookies", flow.cookies_sent),
+                ("response", "headers", flow.response_headers),
+                ("response", "body", flow.response_body),
+                ("response", "cookies", flow.cookies_set),
             ]
 
-            for location_name, target_payload in targets:
+            for direction, location_name, target_payload in targets:
                 if not target_payload:
                     continue
+                # Scan both the captured representation and recursively decoded values.
+                # This catches URL/base64-wrapped values without losing the original
+                # token that was actually observed on the wire.
+                decoded_payload = recursive_decode(target_payload)
                 found_tuples = scan_for_seed_matches(target_payload, seed_data)
+                if decoded_payload != target_payload:
+                    found_tuples.extend(scan_for_seed_matches(decoded_payload, seed_data))
                 if found_tuples:
                     logger.debug(
-                        "Seed matches: flow_id=%s location=%s count=%d",
-                        flow.flow_id, location_name, len(found_tuples),
+                        "Seed matches: flow_id=%s direction=%s location=%s count=%d",
+                        flow.flow_id, direction, location_name, len(found_tuples),
                     )
+                seen: set[tuple[str, str]] = set()
                 for matched_val, label in found_tuples:
+                    if (matched_val, label) in seen:
+                        continue
+                    seen.add((matched_val, label))
+                    representation = "hash" if any(
+                        algorithm in label for algorithm in ("MD5", "SHA-1", "SHA-256")
+                    ) else "base64" if "Base64" in label else "plaintext"
                     matches.append(
                         {
+                            "flow_id": flow.flow_id,
+                            "direction": direction,
+                            "data_label": label.split(" (")[0],
                             "matched_value": matched_val,
                             "field_type": label,
-                            "location": f"flow[{flow.flow_id}].{location_name}",
+                            "location": f"flow[{flow.flow_id}].{direction}.{location_name}",
                             "host": flow.host,
+                            "representation": representation,
                         }
                     )
 
         return matches
+
+    @staticmethod
+    def _group_personal_data_flows(
+        matches: List[Dict[str, Any]],
+    ) -> List[PersonalDataFlowEvidence]:
+        """Aggregate repeated matches while retaining every source flow ID."""
+        grouped: Dict[tuple[str, str, str, str, str], Dict[str, Any]] = {}
+        for match in matches:
+            key = (
+                match["host"],
+                match["direction"],
+                match["location"].rsplit(".", 1)[-1],
+                match["data_label"],
+                match["representation"],
+            )
+            if key not in grouped:
+                grouped[key] = {
+                    "endpoint": match["host"],
+                    "direction": match["direction"],
+                    "location": match["location"].rsplit("].", 1)[-1],
+                    "data_label": match["data_label"],
+                    "sample_value": match["matched_value"],
+                    "matched_values": [],
+                    "representation": match["representation"],
+                    "count": 0,
+                    "flow_ids": [],
+                }
+            grouped[key]["count"] += 1
+            if match["matched_value"] not in grouped[key]["matched_values"]:
+                grouped[key]["matched_values"].append(match["matched_value"])
+            if match["flow_id"] not in grouped[key]["flow_ids"]:
+                grouped[key]["flow_ids"].append(match["flow_id"])
+
+        return [PersonalDataFlowEvidence(**item) for item in grouped.values()]

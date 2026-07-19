@@ -38,6 +38,7 @@ class NetworkFlow(BaseModel):
     response_body: Optional[str] = None
     cookies_sent: Dict[str, str] = Field(default_factory=dict)
     cookies_set: Dict[str, str] = Field(default_factory=dict)
+    cookies_set_domain_attributes: Dict[str, str] = Field(default_factory=dict)
 
 
 class SeedData(BaseModel):
@@ -99,22 +100,30 @@ class PrivacyDiscrepancy(BaseModel):
 
 
 class TrackingToken(BaseModel):
-    """Represents a high-entropy string candidate flagged as a dynamic identifier."""
+    """Raw high-entropy identifier evidence retained for audit inspection."""
 
     token: str
     location: str  # example: "cookies_sent.session_id", "request_body.meta.visitor_id"
     entropy: float
     is_high_entropy: bool = True
     occurrences: int = 1
+    endpoint: Optional[str] = None
+    flow_ids: List[str] = Field(default_factory=list)
 
 
-class SeedMatchEvidence(BaseModel):
-    """A controlled-value match found in captured traffic."""
+class PersonalDataFlowEvidence(BaseModel):
+    """Grouped personal-data evidence with flow IDs retained for reproduction."""
 
-    matched_value: str
-    field_type: str
+    endpoint: str
+    direction: Literal["request", "response"]
     location: str
-    host: Optional[str] = None
+    data_label: str
+    sample_value: str
+    matched_values: List[str] = Field(default_factory=list)
+    representation: Literal["plaintext", "hash", "base64", "url_encoded", "unknown"] = "unknown"
+    detection_method: Literal["seed_match"] = "seed_match"
+    count: int = Field(ge=1)
+    flow_ids: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +277,8 @@ class StorageClassificationResult(BaseModel):
     """Reconciled evaluation of an observed client-side storage mechanism or cookie against declared policies."""
 
     name: str
+    domains: List[str] = Field(default_factory=list)
+    cookie_domain_attributes: List[str] = Field(default_factory=list)
     storage_type: StorageTechnologyType = StorageTechnologyType.COOKIE
     observed_lifespan_days: Optional[float] = None
     classification: StorageClassificationType
@@ -401,7 +412,7 @@ class FullAuditReport(BaseModel):
     observed_endpoints: List[ObservedEndpoint] = Field(default_factory=list)
     tracking_tokens: List[TrackingToken] = Field(default_factory=list)
     cookie_longevity_results: List[CookieLongevityResult] = Field(default_factory=list)
-    seed_matches: List[SeedMatchEvidence] = Field(default_factory=list)
+    personal_data_flows: List[PersonalDataFlowEvidence] = Field(default_factory=list)
     discrepancies: List[ComplianceDiscrepancy] = Field(default_factory=list)
     total_flows_analysed: int = 0
     total_discrepancies_found: int = 0

@@ -28,11 +28,11 @@ The current implementation contributes to that question by combining determinist
 
 ### Personal-data and identifier detection
 
-Optional seed values can be supplied through a JSON file. For each seed, the analyser generates plaintext, case variants, MD5, SHA-1, SHA-256, and Base64 lookup values. It scans URLs, request headers, request bodies, and sent cookies for matches.
+Optional seed values can be supplied through a JSON file. For each seed, the analyser generates plaintext, case variants, MD5, SHA-1, SHA-256, and Base64 lookup values. It scans request and response URLs, headers, bodies, and cookies, including recursively decoded JSON, URL-encoded, and Base64-wrapped payloads.
 
-The seed values are useful for controlled privacy-testing scenarios. For example, a test email address or account identifier entered during a browser interaction. Raw matched values should be treated as sensitive evidence.
+The seed values are useful for controlled privacy-testing scenarios. For example, a test email address or account identifier entered during a browser interaction. Raw matched values should be treated as sensitive evidence. Matches are grouped by endpoint, direction, payload location, data label, and representation. The JSON report retains occurrence counts, matched values, and source flow IDs for reproduction; the LLM and Markdown report receive/show the compact grouped evidence.
 
-The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Generic HTTP negotiation headers such as `Accept` and `Accept-Language` are excluded because their values can score highly without being identifiers. Repeated findings are aggregated with occurrence counts. Entropy is a heuristic, meaning a high score does not prove that a value is personal data or a tracker.
+The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Generic HTTP negotiation headers such as `Accept` and `Accept-Language` are excluded because their values can score highly without being identifiers. Entropy evidence is grouped by endpoint and payload location before it is sent to the LLM, using counts, reuse, flow count, and entropy ranges rather than raw token strings. Entropy is a heuristic supporting signal, meaning a high score does not prove that a value is personal data or a tracker.
 
 ### Endpoint profiling
 
@@ -54,6 +54,8 @@ The storage profiler inventories observed cookie names from sent and set cookies
 - Undocumented cookies.
 - Cookies with excessive lifetimes.
 - Observed lifespan and matching policy declarations.
+- The network hosts where each cookie was observed being set or sent.
+- The optional `Domain=` attribute declared in `Set-Cookie` headers.
 
 Cookies with a parsed lifetime longer than 90 days are flagged by the rule-based analyser. This is an analytical threshold, not a legal conclusion.
 
@@ -92,7 +94,7 @@ The document ingestor sends the complete aggregated policy/DPA text by default t
 - International-transfer mechanisms.
 - Retention statements.
 
-The cross-referencer then receives structured policy claims together with observed endpoints, seed matches, entropy candidates, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
+The cross-referencer then receives structured policy claims together with observed endpoints, grouped personal-data flow mappings, grouped identifier signals, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
 
 ### Indicative risk evaluation
 
@@ -128,7 +130,7 @@ The risk score is `likelihood × severity`. The indicative matrix is:
 
 These levels are indications for human review, not definitive legal conclusions. The Markdown and JSON reports include the inputs, score, indicative level, potential harms, assessment basis, and a human-verification flag.
 
-LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
+LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, grouped personal-data mappings, grouped entropy signals, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
 
 ### Reproducibility
 

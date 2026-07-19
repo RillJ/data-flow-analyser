@@ -44,9 +44,15 @@ class StorageProfiler:
 
         # Collect unique set of observed cookie names across sent/set cookies & longevity analyses
         observed_cookie_names: Set[str] = set()
+        cookie_domains: dict[str, Set[str]] = {}
+        cookie_domain_attributes: dict[str, Set[str]] = {}
         for flow in flows:
             observed_cookie_names.update(flow.cookies_sent.keys())
             observed_cookie_names.update(flow.cookies_set.keys())
+            for cookie_name in set(flow.cookies_sent) | set(flow.cookies_set):
+                cookie_domains.setdefault(cookie_name, set()).add(flow.host)
+            for cookie_name, domain in flow.cookies_set_domain_attributes.items():
+                cookie_domain_attributes.setdefault(cookie_name, set()).add(domain)
 
         # Map longevity details by cookie name
         longevity_map = {c.cookie_name: c for c in cookie_results}
@@ -77,6 +83,8 @@ class StorageProfiler:
                     results.append(
                         StorageClassificationResult(
                             name=cookie_name,
+                            domains=sorted(cookie_domains.get(cookie_name, set())),
+                            cookie_domain_attributes=sorted(cookie_domain_attributes.get(cookie_name, set())),
                             storage_type=StorageTechnologyType.COOKIE,
                             observed_lifespan_days=observed_days,
                             classification=StorageClassificationType.EXCESSIVE_LIFESPAN,
@@ -92,6 +100,8 @@ class StorageProfiler:
                     results.append(
                         StorageClassificationResult(
                             name=cookie_name,
+                            domains=sorted(cookie_domains.get(cookie_name, set())),
+                            cookie_domain_attributes=sorted(cookie_domain_attributes.get(cookie_name, set())),
                             storage_type=StorageTechnologyType.COOKIE,
                             observed_lifespan_days=observed_days,
                             classification=StorageClassificationType.DOCUMENTED,
@@ -104,6 +114,8 @@ class StorageProfiler:
                 results.append(
                     StorageClassificationResult(
                         name=cookie_name,
+                        domains=sorted(cookie_domains.get(cookie_name, set())),
+                        cookie_domain_attributes=sorted(cookie_domain_attributes.get(cookie_name, set())),
                         storage_type=StorageTechnologyType.COOKIE,
                         observed_lifespan_days=observed_days,
                         classification=StorageClassificationType.UNDOCUMENTED,
