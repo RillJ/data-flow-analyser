@@ -284,17 +284,17 @@ def audit(
         )
 
     markdown_str = ReportExporter.to_markdown(report)
+    output_stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    json_output_path = out_json or Path.cwd() / f"audit-{output_stamp}.json"
+    markdown_output_path = out_md or Path.cwd() / f"audit-{output_stamp}.md"
 
-    if out_json:
-        ReportExporter.to_json_file(report, out_json)
-        console.print(f"[bold green]✓[/bold green] JSON report written to: {out_json}")
+    ReportExporter.to_json_file(report, json_output_path)
+    console.print(f"[bold green]✓[/bold green] JSON report written to: {json_output_path}")
 
-    if out_md:
-        ReportExporter.to_markdown_file(report, out_md)
-        console.print(f"[bold green]✓[/bold green] Markdown report written to: {out_md}")
+    ReportExporter.to_markdown_file(report, markdown_output_path)
+    console.print(f"[bold green]✓[/bold green] Markdown report written to: {markdown_output_path}")
 
-    if not out_json and not out_md:
-        console.print(Panel(Markdown(markdown_str), title="Audit Results", expand=False))
+    console.print(Panel(Markdown(markdown_str), title="Audit Results", expand=False))
 
 
 def main() -> None:

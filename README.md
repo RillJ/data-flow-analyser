@@ -246,7 +246,7 @@ data-flow-analyser audit \
   --log-file audit-debug.log
 ```
 
-Available output formats are JSON and Markdown. If neither `--out-json` nor `--out-md` is supplied, the Markdown report is printed to the terminal.
+Every audit writes both a JSON report and a Markdown report, and always prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
 
 ## Processing pipeline
 
