@@ -46,6 +46,8 @@ from data_flow_analyser.models.schemas import (
 from data_flow_analyser import __version__
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
 from data_flow_analyser.parsers.decoder import recursive_decode
+from data_flow_analyser.endpoint_inventory import host_is_excluded
+from data_flow_analyser.engines.endpoint_profiler import normalise_domain, unique_hosts
 
 logger = logging.getLogger("data_flow_analyser.pipeline")
 
@@ -83,6 +85,7 @@ class AuditPipeline:
         flow_file_path: Optional[Union[str, Path]] = None,
         documents: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         seed_data: Optional[Union[SeedData, Dict[str, str]]] = None,
+        excluded_domains: Optional[Sequence[str]] = None,
         consent_granted_at: Optional[datetime] = None,
         consent_withdrawn_at: Optional[datetime] = None,
     ) -> FullAuditReport:
@@ -93,6 +96,7 @@ class AuditPipeline:
             flow_file_path: Path to a mitmproxy flow dump or HAR capture file.
             documents: Single file path, text string, or sequence/list of file paths/texts.
             seed_data: User personal data key-value pairs or pre-computed SeedData.
+            excluded_domains: Domains whose flows are removed before any analysis.
             consent_granted_at: Optional timestamp at which the user gave consent.
             consent_withdrawn_at: Optional timestamp at which the user withdrew consent.
 
@@ -112,7 +116,15 @@ class AuditPipeline:
         path_str = str(target_flow_path)
         logger.info(f"Loading and parsing network capture file: {path_str}")
         flows: List[NetworkFlow] = parse_flow_file(path_str)
-        logger.info(f"Extracted {len(flows)} total network flows.")
+        exclusions = {normalise_domain(domain.removeprefix("*.")) for domain in (excluded_domains or [])}
+        if exclusions:
+            original_flow_count = len(flows)
+            flows = [flow for flow in flows if not host_is_excluded(flow.host, exclusions)]
+            logger.info(
+                "Excluded %d of %d parsed flows for %d configured domains.",
+                original_flow_count - len(flows), original_flow_count, len(exclusions),
+            )
+        logger.info(f"Extracted {len(flows)} flows for analysis.")
         for index, flow in enumerate(flows, start=1):
             logger.debug(
                 "Flow %d/%d parsed: id=%s method=%s host=%s url=%s request_headers=%d "
@@ -242,7 +254,8 @@ class AuditPipeline:
             analysis_started_at=analysis_started_at,
             analysis_finished_at=datetime.now(timezone.utc),
             reference_time=analysis_started_at,
-            input_hashes=self._input_hashes(target_flow_path, target_docs, seed_data),
+            input_hashes=self._input_hashes(target_flow_path, target_docs, seed_data, exclusions),
+            excluded_domains=sorted(exclusions),
         )
 
         logger.info(f"Audit completed. Found {report.total_discrepancies_found} discrepancies.")
@@ -258,6 +271,7 @@ class AuditPipeline:
         flow_file_path: Union[str, Path],
         documents: Union[str, Path, Sequence[Union[str, Path]]],
         seed_data: Optional[Union[SeedData, Dict[str, str]]],
+        excluded_domains: Optional[Sequence[str]] = None,
     ) -> Dict[str, str]:
         """Create non-sensitive hashes for the inputs used by an analysis."""
         hashes: Dict[str, str] = {}
@@ -283,6 +297,10 @@ class AuditPipeline:
                 serialised = seed_data
             hashes["seed_data"] = cls._sha256_bytes(
                 json.dumps(serialised, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            )
+        if excluded_domains:
+            hashes["excluded_domains"] = cls._sha256_bytes(
+                json.dumps(sorted(excluded_domains), separators=(",", ":")).encode("utf-8")
             )
         return hashes
 
@@ -371,19 +389,14 @@ class AuditPipeline:
     def _profile_endpoints(self, flows: List[NetworkFlow]) -> List[ObservedEndpoint]:
         """Profiles unique host domains observed across network flows."""
         endpoints: List[ObservedEndpoint] = []
-        seen_hosts: set[str] = set()
-
-        for flow in flows:
-            host = flow.host
-            if host and host not in seen_hosts:
-                seen_hosts.add(host)
-                logger.debug("Profiling endpoint %d: host=%s", len(seen_hosts), host)
-                resolved_ip = self.endpoint_profiler.resolve_domain_ip(host)
-                profiled = self.endpoint_profiler.profile_endpoint(
-                    domain=host,
-                    ip_address=resolved_ip,
-                )
-                endpoints.append(profiled)
+        for index, host in enumerate(unique_hosts(flows), start=1):
+            logger.debug("Profiling endpoint %d: host=%s", index, host)
+            resolved_ip = self.endpoint_profiler.resolve_domain_ip(host)
+            profiled = self.endpoint_profiler.profile_endpoint(
+                domain=host,
+                ip_address=resolved_ip,
+            )
+            endpoints.append(profiled)
 
         return endpoints
 

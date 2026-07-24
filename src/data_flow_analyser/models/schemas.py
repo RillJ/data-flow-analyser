@@ -396,6 +396,7 @@ class AnalysisProvenance(BaseModel):
     analysis_finished_at: Optional[datetime] = None
     reference_time: Optional[datetime] = None
     input_hashes: Dict[str, str] = Field(default_factory=dict)
+    excluded_domains: List[str] = Field(default_factory=list)
     external_metadata_mode: str = "live_network_lookups"
 
 

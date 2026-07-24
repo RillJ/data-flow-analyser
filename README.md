@@ -162,6 +162,34 @@ Check that the installation is available:
 data-flow-analyser healthcheck
 ```
 
+Before an audit, use the deterministic endpoint inventory command to review every host in a capture. It does not call an LLM or enrich domains over the network:
+
+```bash
+data-flow-analyser endpoints \
+  --capture scenarios.flows \
+  --out-json endpoints.json
+```
+
+The inventory includes flow counts, methods, paths, and first/last observation times. Use it to create an optional exclusion file for browser, Mozilla, extension, or other researcher-identified traffic:
+
+```json
+{
+  "domains": [
+    "mozilla.org",
+    "bitwarden.com"
+  ]
+}
+```
+
+Pass that file to `audit` with `--exclude-file`. Matching is case-insensitive and excludes the listed domain plus all of its subdomains. Excluded flows are removed immediately after parsing, before endpoint profiling, seed matching, cookie and identifier analysis, fingerprint analysis, or LLM cross-referencing. Without `--exclude-file`, no flows are excluded.
+
+```bash
+data-flow-analyser audit \
+  --capture scenarios.flows \
+  --doc dpa.txt \
+  --exclude-file excluded-domains.json
+```
+
 Run an audit with one or more policy documents, for example:
 
 ```bash

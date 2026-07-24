@@ -22,10 +22,13 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
 
 from data_flow_analyser import __version__
 from data_flow_analyser.exporter import ReportExporter
 from data_flow_analyser.pipeline import AuditPipeline
+from data_flow_analyser.endpoint_inventory import inventory_flows, load_excluded_domains
+from data_flow_analyser.parsers.mitm_parser import parse_flow_file
 
 app = typer.Typer(help="Data Flow Analyser command-line interface.")
 console = Console()
@@ -94,6 +97,52 @@ def healthcheck() -> None:
     console.print(Panel("Data Flow Analyser engine ready", style="green"))
 
 
+@app.command("endpoints")
+def endpoints(
+    flows: Path = typer.Option(
+        ...,
+        "--capture",
+        "-c",
+        help="Path to input mitmproxy flow or HAR capture file.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    out_json: Optional[Path] = typer.Option(
+        None,
+        "--out-json",
+        help="Path to write the endpoint inventory as JSON.",
+    ),
+) -> None:
+    """List every destination host in a capture for exclusion review."""
+    parsed_flows = parse_flow_file(flows)
+    inventory = inventory_flows(parsed_flows)
+    payload = {
+        "capture": str(flows),
+        "flow_count": len(parsed_flows),
+        "endpoint_count": len(inventory),
+        "endpoints": inventory,
+    }
+
+    if out_json:
+        out_json.parent.mkdir(parents=True, exist_ok=True)
+        out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        console.print(f"[bold green]✓[/bold green] Endpoint inventory written to: {out_json}")
+        return
+
+    table = Table(title=f"Endpoints in {flows}")
+    table.add_column("Domain")
+    table.add_column("Flows", justify="right")
+    table.add_column("Methods")
+    table.add_column("Paths")
+    for item in inventory:
+        methods = ", ".join(f"{name} ({count})" for name, count in item["methods"].items())
+        paths = ", ".join(item["paths"].keys())
+        table.add_row(item["domain"], str(item["flow_count"]), methods, paths)
+    console.print(table)
+
+
 @app.command()
 def audit(
     flows: Path = typer.Option(
@@ -121,6 +170,15 @@ def audit(
         "--seed-file",
         "-s",
         help="Path to JSON file containing seed key-value pairs (e.g. {\"email\": \"user@test.com\"}).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+    ),
+    exclude_json: Optional[Path] = typer.Option(
+        None,
+        "--exclude-file",
+        help='JSON file of domains to ignore, e.g. {"domains": ["mozilla.org"]}.',
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -205,10 +263,22 @@ def audit(
         if seed_json:
             seed_data = json.loads(seed_json.read_text(encoding="utf-8"))
 
+        excluded_domains = set()
+        if exclude_json:
+            try:
+                excluded_domains = load_excluded_domains(
+                    json.loads(exclude_json.read_text(encoding="utf-8"))
+                )
+            except (OSError, json.JSONDecodeError, ValueError) as error:
+                raise typer.BadParameter(
+                    f"invalid exclusion file: {error}", param_hint="--exclude-file"
+                ) from error
+
         report = pipeline.run(
             flow_file_path=flows,
             documents=doc,
             seed_data=seed_data,
+            excluded_domains=sorted(excluded_domains),
             consent_granted_at=granted_at,
             consent_withdrawn_at=withdrawn_at,
         )

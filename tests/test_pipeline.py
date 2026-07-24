@@ -42,6 +42,18 @@ def test_pipeline_execution(
 
     mock_parse_flow_file.return_value = [mock_flow]
 
+    ignored_flow = MagicMock()
+    ignored_flow.flow_id = "mozilla-flow"
+    ignored_flow.host = "push.services.mozilla.org"
+    ignored_flow.url = "https://push.services.mozilla.org/update"
+    ignored_flow.request_headers = {}
+    ignored_flow.request_body = '{"email": "user@test.com"}'
+    ignored_flow.cookies_sent = {}
+    ignored_flow.cookies_set = {}
+    ignored_flow.response_headers = {}
+    ignored_flow.timestamp = None
+    mock_parse_flow_file.return_value = [mock_flow, ignored_flow]
+
     # Mock Document Ingestor LLM Response
     mock_ingestor_response = MagicMock()
     mock_ingestor_response.choices = [
@@ -127,10 +139,13 @@ def test_pipeline_execution(
         flow_file_path=flow_file,
         documents=[doc1, doc2],
         seed_data={"email": "user@test.com"},
+        excluded_domains=["mozilla.org"],
     )
 
     assert isinstance(report, FullAuditReport)
     assert report.total_flows_analysed == 1
+    assert report.provenance.excluded_domains == ["mozilla.org"]
+    assert "excluded_domains" in report.provenance.input_hashes
     assert report.total_discrepancies_found == 1
     assert report.discrepancies[0].discrepancy_id == "DISC-001"
     assert report.provenance.model == "gpt-5.4-mini"

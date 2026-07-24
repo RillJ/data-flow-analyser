@@ -17,11 +17,11 @@ import json
 import logging
 from pathlib import Path
 import socket
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 import urllib.error
 import urllib.request
 
-from data_flow_analyser.models.schemas import ObservedEndpoint
+from data_flow_analyser.models.schemas import NetworkFlow, ObservedEndpoint
 
 # List of EU/EEA country codes for third-country transfer checks. Source: https://www.netherlandsworldwide.nl/eu-eea-efta-schengen-countries
 EU_EEA_COUNTRIES = {
@@ -31,6 +31,23 @@ EU_EEA_COUNTRIES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+def normalise_domain(value: str) -> str:
+    """Return a captured host/domain in a stable form for comparisons."""
+    return value.strip().lower().rstrip(".")
+
+
+def unique_hosts(flows: Iterable[NetworkFlow]) -> list[str]:
+    """Return unique captured hosts in first-observed order."""
+    hosts: list[str] = []
+    seen: set[str] = set()
+    for flow in flows:
+        host = normalise_domain(flow.host)
+        if host and host not in seen:
+            seen.add(host)
+            hosts.append(host)
+    return hosts
 
 
 class DDGTrackerRadar:
@@ -73,7 +90,7 @@ class DDGTrackerRadar:
         Dynamically fetches tracker metadata for a single domain from GitHub raw assets.
         Caches result in self.radar_data.
         """
-        domain_clean = domain.lower().strip()
+        domain_clean = normalise_domain(domain)
         if domain_clean in self.radar_data:
             logger.debug("Tracker Radar cache hit: domain=%s", domain_clean)
             return self.radar_data[domain_clean]
@@ -107,7 +124,7 @@ class DDGTrackerRadar:
         """
         Returns DDG Tracker Radar metadata for an exact domain string.
         """
-        domain_clean = domain.lower().strip()
+        domain_clean = normalise_domain(domain)
 
         if domain_clean in self.radar_data:
             return self.radar_data[domain_clean]
@@ -125,7 +142,7 @@ class DDGTrackerRadar:
         Returns:
             Tuple of (parent_entity_name, category)
         """
-        clean_domain = domain.lower().strip()
+        clean_domain = normalise_domain(domain)
         parts = clean_domain.split(".")
 
         # Walk down domain hierarchy: sub.ad.doubleclick.net > ad.doubleclick.net -> doubleclick.net
@@ -177,7 +194,7 @@ class EndpointProfiler:
 
     def resolve_domain_ip(self, domain: str) -> Optional[str]:
         """Resolve a domain to a representative address for IP enrichment."""
-        domain_clean = domain.strip().lower()
+        domain_clean = normalise_domain(domain)
         if domain_clean in self._domain_ip_cache:
             logger.debug("Domain resolution cache hit: domain=%s ip=%s", domain_clean, self._domain_ip_cache[domain_clean])
             return self._domain_ip_cache[domain_clean]
