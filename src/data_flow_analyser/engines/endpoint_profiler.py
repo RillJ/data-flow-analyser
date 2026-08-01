@@ -242,7 +242,7 @@ class EndpointProfiler:
 
 
     def lookup_ip_geolocation(self, ip_address: str) -> Dict[str, Any]:
-        """Looks up country code and ASN organization for an IP address."""
+        """Looks up country code and ASN organisation for an IP address."""
         if ip_address in self._geoip_cache:
             logger.debug("GeoIP cache hit: ip=%s result=%s", ip_address, self._geoip_cache[ip_address])
             return self._geoip_cache[ip_address]

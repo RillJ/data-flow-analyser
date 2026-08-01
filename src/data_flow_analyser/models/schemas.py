@@ -77,7 +77,7 @@ class PolicyStatement(BaseModel):
 # ---------------------------------------------------------------------------
 
 class RiskComponents(BaseModel):
-    """Individual normalized factors contributing to a network flow risk score."""
+    """Individual normalised factors contributing to a network flow risk score."""
 
     data_sensitivity_score: float = Field(ge=0.0, le=10.0, description="S(D_personal_data)")
     subprocessor_status_score: float = Field(ge=0.0, le=10.0, description="P(E_sub)")
@@ -120,8 +120,7 @@ class PersonalDataFlowEvidence(BaseModel):
     data_label: str
     sample_value: str
     matched_values: List[str] = Field(default_factory=list)
-    representation: Literal["plaintext", "hash", "base64", "url_encoded", "unknown"] = "unknown"
-    detection_method: Literal["seed_match"] = "seed_match"
+    detection_method: Literal["seed_match", "presidio"] = "seed_match"
     count: int = Field(ge=1)
     flow_ids: List[str] = Field(default_factory=list)
 
@@ -417,7 +416,6 @@ class FullAuditReport(BaseModel):
     discrepancies: List[ComplianceDiscrepancy] = Field(default_factory=list)
     total_flows_analysed: int = 0
     total_discrepancies_found: int = 0
-    requires_human_verification: bool = True
     analysis_status: Literal["complete", "partial", "failed"] = "complete"
     warnings: List[str] = Field(default_factory=list)
     provenance: AnalysisProvenance = Field(default_factory=AnalysisProvenance)

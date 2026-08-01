@@ -63,7 +63,6 @@ class ReportExporter:
         md.append(f"**Analysed Flows:** {report.total_flows_analysed}  ")
         md.append(f"**Discrepancies Found:** {report.total_discrepancies_found}  ")
         md.append(f"**Analysis Status:** {report.analysis_status}  ")
-        md.append(f"**Human Verification Required:** {report.requires_human_verification}\n")
 
         md.append("## Reproducibility Metadata\n")
         provenance = report.provenance
@@ -154,16 +153,17 @@ class ReportExporter:
                 )
             md.append("\n")
         md.append("## Personal Data Flow Mapping\n")
-        md.append("_Grouped deterministic seed evidence mapped to endpoint, direction, payload location, and data label. Counts show repeated observations; source flow IDs are retained in JSON for reproduction but omitted here._\n")
+        md.append("_Grouped automated personal-data evidence mapped to endpoint, direction, payload location, and data label. `seed_match` is controlled-value evidence; `presidio` is a scored candidate and requires human verification. Counts show repeated observations; source flow IDs are retained in JSON for reproduction but omitted here._\n")
         if not report.personal_data_flows:
-            md.append("_No personal-data flow evidence detected from the supplied seeds._\n")
+            md.append("_No personal-data flow evidence detected._\n")
         else:
-            md.append("| Count | Direction | Endpoint | Data label | Representation | Payload location | Sample value |")
+            md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value |")
             md.append("| ---: | --- | --- | --- | --- | --- | --- |")
             for evidence in report.personal_data_flows:
                 md.append(
-                    f"| {evidence.count} | {evidence.direction} | `{evidence.endpoint}` | "
-                    f"{evidence.data_label} | {evidence.representation} | `{evidence.location}` | "
+                    f"| {evidence.count} | {evidence.detection_method} | "
+                    f"{evidence.direction} | `{evidence.endpoint}` | "
+                    f"{evidence.data_label} | `{evidence.location}` | "
                     f"`{evidence.sample_value}` |"
                 )
             md.append("\n")

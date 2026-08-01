@@ -216,6 +216,16 @@ def audit(
         "--api-base",
         help="Custom API base URL for LiteLLM (optional).",
     ),
+    presidio_language: str = typer.Option(
+        "en",
+        "--presidio-language",
+        help="ISO-639-1 language for Presidio NLP detection (requires the matching spaCy model).",
+    ),
+    presidio_full_ner: bool = typer.Option(
+        False,
+        "--presidio-full-ner",
+        help="Run spaCy NER on large values too; slower, but may improve accuracy.",
+    ),
     consent_granted_at: Optional[str] = typer.Option(
         None,
         "--consent-granted-at",
@@ -257,6 +267,8 @@ def audit(
             temperature=temperature,
             api_key=api_key,
             api_base=api_base,
+            presidio_language=presidio_language,
+            presidio_full_ner=presidio_full_ner,
         )
 
         seed_data = None

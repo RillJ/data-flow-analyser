@@ -30,6 +30,7 @@ from data_flow_analyser.engines.seed_hasher import (
     generate_seed_hash_map,
     scan_for_seed_matches,
 )
+from data_flow_analyser.engines.presidio_detector import PresidioPersonalDataDetector
 from data_flow_analyser.models.schemas import (
     AnalysisProvenance,
     CookieLongevityResult,
@@ -65,6 +66,8 @@ class AuditPipeline:
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         temperature: float = 0.0,
+        presidio_language: str = "en",
+        presidio_full_ner: bool = False,
     ):
         self.doc_ingestor = PolicyDocumentIngestor(
             model=llm_model, api_key=api_key, api_base=api_base,
@@ -76,6 +79,10 @@ class AuditPipeline:
         )
         self.endpoint_profiler = EndpointProfiler()
         self.fingerprint_profiler = FingerprintProfiler()
+        self.presidio_detector = PresidioPersonalDataDetector(
+            language=presidio_language,
+            full_ner=presidio_full_ner,
+        )
         self.llm_model = llm_model
         self.api_base = api_base
         self.temperature = temperature
@@ -157,6 +164,12 @@ class AuditPipeline:
             )
         logger.debug("Seed matching complete: occurrences=%d groups=%d", len(seed_matches), len(personal_data_flows))
 
+        # Seed-independent personal-data candidate detection on decoded values.
+        presidio_matches = self.presidio_detector.detect_flows(flows)
+        personal_data_flows = self._group_personal_data_flows(seed_matches + presidio_matches)
+        if presidio_matches:
+            logger.info("Detected %d additional Presidio personal data candidates.", len(presidio_matches))
+
         # Entropy tokens & cookie longevity
         entropy_tokens: List[TrackingToken] = []
         cookie_results: List[CookieLongevityResult] = []
@@ -194,7 +207,7 @@ class AuditPipeline:
             consent_withdrawn_at=consent_withdrawn_at,
         )
         candidate_count = sum(vector.is_candidate for vector in fingerprint_vectors)
-        fingerprint_summary = self._summarize_fingerprints(
+        fingerprint_summary = self._summarise_fingerprints(
             fingerprint_vectors, fingerprint_findings
         )
         logger.info(
@@ -242,6 +255,10 @@ class AuditPipeline:
         report.personal_data_flows = personal_data_flows
         if doc_analysis.warnings:
             report.warnings = doc_analysis.warnings + report.warnings
+        if self.presidio_detector.warning:
+            report.warnings.append(self.presidio_detector.warning)
+            if report.analysis_status == "complete":
+                report.analysis_status = "partial"
         if doc_analysis.analysis_status == "failed":
             report.analysis_status = "failed"
         elif doc_analysis.analysis_status == "partial" and report.analysis_status == "complete":
@@ -305,7 +322,7 @@ class AuditPipeline:
         return hashes
 
     @staticmethod
-    def _summarize_fingerprints(
+    def _summarise_fingerprints(
         vectors: List[FingerprintVector],
         findings: List[FingerprintPersistenceFinding],
     ) -> FingerprintAnalysisSummary:
@@ -447,9 +464,6 @@ class AuditPipeline:
                     if (matched_val, label) in seen:
                         continue
                     seen.add((matched_val, label))
-                    representation = "hash" if any(
-                        algorithm in label for algorithm in ("MD5", "SHA-1", "SHA-256")
-                    ) else "base64" if "Base64" in label else "plaintext"
                     matches.append(
                         {
                             "flow_id": flow.flow_id,
@@ -459,7 +473,6 @@ class AuditPipeline:
                             "field_type": label,
                             "location": f"flow[{flow.flow_id}].{direction}.{location_name}",
                             "host": flow.host,
-                            "representation": representation,
                         }
                     )
 
@@ -472,22 +485,26 @@ class AuditPipeline:
         """Aggregate repeated matches while retaining every source flow ID."""
         grouped: Dict[tuple[str, str, str, str, str], Dict[str, Any]] = {}
         for match in matches:
+            endpoint = match.get("host") or match.get("endpoint")
+            if not endpoint:
+                logger.debug("Skipping personal-data match without endpoint: %s", match)
+                continue
             key = (
-                match["host"],
+                endpoint,
                 match["direction"],
                 match["location"].rsplit(".", 1)[-1],
                 match["data_label"],
-                match["representation"],
+                match.get("detection_method", "seed_match"),
             )
             if key not in grouped:
                 grouped[key] = {
-                    "endpoint": match["host"],
+                    "endpoint": endpoint,
                     "direction": match["direction"],
                     "location": match["location"].rsplit("].", 1)[-1],
                     "data_label": match["data_label"],
                     "sample_value": match["matched_value"],
                     "matched_values": [],
-                    "representation": match["representation"],
+                    "detection_method": match.get("detection_method", "seed_match"),
                     "count": 0,
                     "flow_ids": [],
                 }
@@ -497,4 +514,13 @@ class AuditPipeline:
             if match["flow_id"] not in grouped[key]["flow_ids"]:
                 grouped[key]["flow_ids"].append(match["flow_id"])
 
-        return [PersonalDataFlowEvidence(**item) for item in grouped.values()]
+        return sorted(
+            (PersonalDataFlowEvidence(**item) for item in grouped.values()),
+            key=lambda evidence: (
+                -evidence.count,
+                evidence.endpoint,
+                evidence.direction,
+                evidence.location,
+                evidence.data_label,
+            ),
+        )

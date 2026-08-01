@@ -19,6 +19,40 @@ from data_flow_analyser.models.schemas import FullAuditReport
 from data_flow_analyser.pipeline import AuditPipeline
 
 
+def test_personal_data_flow_groups_are_sorted_by_count():
+    matches = [
+        {
+            "flow_id": "flow-1",
+            "host": "example.nl",
+            "direction": "request",
+            "location": "flow[flow-1].request.body",
+            "data_label": "name",
+            "matched_value": "Julian Rill",
+        },
+        {
+            "flow_id": "flow-2",
+            "host": "example.nl",
+            "direction": "request",
+            "location": "flow[flow-2].request.url",
+            "data_label": "email",
+            "matched_value": "julian@example.nl",
+        },
+        {
+            "flow_id": "flow-3",
+            "host": "example.nl",
+            "direction": "request",
+            "location": "flow[flow-3].request.url",
+            "data_label": "email",
+            "matched_value": "julian@example.nl",
+        },
+    ]
+
+    grouped = AuditPipeline._group_personal_data_flows(matches)
+
+    assert [evidence.data_label for evidence in grouped] == ["email", "name"]
+    assert [evidence.count for evidence in grouped] == [2, 1]
+
+
 @patch("data_flow_analyser.engines.cross_referencer.completion")
 @patch("data_flow_analyser.engines.document_ingestor.completion")
 @patch("data_flow_analyser.pipeline.parse_flow_file")

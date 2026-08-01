@@ -26,12 +26,23 @@ The current implementation contributes to that question by combining determinist
 - Skips unsupported or malformed flows with diagnostic logging.
 
 
-### Personal-data and identifier detection
+### Personal data flow and identifier detection
 
+Identifying which data is sent to which endpoint helps reviewers connect observed technical behaviour to privacy risks, policy claims, and possible international transfers. The deterministic detectors preserve the underlying traffic evidence, while the AI-assisted stages help organise and compare that evidence with the supplied policy documents.
+
+#### Seed matching
 Optional seed values can be supplied through a JSON file. For each seed, the analyser generates plaintext, case variants, MD5, SHA-1, SHA-256, and Base64 lookup values. It scans request and response URLs, headers, bodies, and cookies, including recursively decoded JSON, URL-encoded, and Base64-wrapped payloads.
 
-The seed values are useful for controlled privacy-testing scenarios. For example, a test email address or account identifier entered during a browser interaction. Raw matched values should be treated as sensitive evidence. Matches are grouped by endpoint, direction, payload location, data label, and representation. The JSON report retains occurrence counts, matched values, and source flow IDs for reproduction; the LLM and Markdown report receive/show the compact grouped evidence.
+The seed values are useful for controlled privacy testing scenarios. For example, a test email address or account identifier entered during a browser interaction. Raw matched values should be treated as sensitive evidence. Matches are grouped by endpoint, direction, payload location, data label, and detection method. The JSON report retains occurrence counts, matched values, and source flow IDs for reproduction; the LLM and Markdown report receive/show the compact grouped evidence.
 
+#### Named Entity Recognition and Regular Expression matching
+When installed, the optional Presidio integration discovers the available Presidio recognisers dynamically instead of using a short hard-coded entity list. It scans global entity types such as names, email addresses, phone numbers, locations, dates, IP addresses, URLs, MAC addresses, crypto wallets, IBANs, and credit cards, together with configured European country-specific recognisers. The European profile includes the Netherlands (`NL`) alongside the UK, Spain, Italy, Poland, Finland, Sweden, Germany, and Turkey; Presidio may not provide a built-in recogniser for every country. Non-European country-specific recognisers are excluded by default.
+
+Presidio results are candidates rather than proof. For performance, very large network flows use a separate deterministic-only Presidio analyser without spaCy NER. Use `--presidio-full-ner` to use the full NER on all values, but note that these can be substantially slower.
+
+If Presidio or its spaCy model is unavailable, the seed-based pipeline continues and records an analysis warning.
+
+#### Shannon entropy calculations
 The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Generic HTTP negotiation headers such as `Accept` and `Accept-Language` are excluded because their values can score highly without being identifiers. Entropy evidence is grouped by endpoint and payload location before it is sent to the LLM, using counts, reuse, flow count, and entropy ranges rather than raw token strings. Entropy is a heuristic supporting signal, meaning a high score does not prove that a value is personal data or a tracker.
 
 ### Endpoint profiling
@@ -152,15 +163,37 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+For seed-independent personal-data detection, install the spaCy model matching the language you want to analyse. For Dutch:
+
+```bash
+python -m spacy download nl_core_news_lg
+```
+
+See the [spaCy model documentation](https://spacy.io/models/nl) for model details.
+
+The core pipeline remains usable without the model. Presidio findings are then skipped and reported as an analysis warning. The CLI defaults to English (`--presidio-language en`); use a matching spaCy model and language option for supported European languages such as Dutch (`nl`), German (`de`), Spanish (`es`), Italian (`it`), or French (`fr`).
+
+Supported models:
+- en_core_web_lg
+- nl_core_news_lg
+- de_core_news_lg
+- es_core_news_lg
+- it_core_news_lg
+- fr_core_news_lg
+
 The package uses LiteLLM for model access. Configure the provider credentials expected by LiteLLM in `.env`, or provide `--api-key` and optionally `--api-base` on the command line.
 
 ## Usage
+
+### Check the installation
 
 Check that the installation is available:
 
 ```bash
 data-flow-analyser healthcheck
 ```
+
+### Review endpoints before an audit
 
 Before an audit, use the deterministic endpoint inventory command to review every host in a capture. It does not call an LLM or enrich domains over the network:
 
@@ -190,6 +223,8 @@ data-flow-analyser audit \
   --exclude-file excluded-domains.json
 ```
 
+### Run an audit
+
 Run an audit with one or more policy documents, for example:
 
 ```bash
@@ -200,6 +235,8 @@ data-flow-analyser audit \
   --out-json audit.json \
   --out-md audit.md
 ```
+
+### Match controlled test values
 
 Add controlled seed values from a JSON file:
 
@@ -217,6 +254,8 @@ data-flow-analyser audit \
   --seed-file seed.json
 ```
 
+### Control reproducibility
+
 The LLM temperature can be set explicitly for a run:
 
 ```bash
@@ -226,6 +265,8 @@ data-flow-analyser audit \
   --temperature 0
 ```
 
+### Analyse consent phases
+
 Provide consent-event timestamps when the capture contains those phases. Timestamps must be ISO-8601 and include a timezone:
 
 ```bash
@@ -233,8 +274,10 @@ data-flow-analyser audit \
   --capture scenarios.flows \
   --doc dpa.txt \
   --consent-granted-at "2026-06-28T10:15:00+02:00" \
-  --consent-withdrawn-at "2026-06-2810:40:00+02:00"
+  --consent-withdrawn-at "2026-06-28T10:40:00+02:00"
 ```
+
+### Enable diagnostics
 
 Use verbose diagnostics to inspect every major processing stage and the exact LLM inputs:
 
@@ -246,54 +289,69 @@ data-flow-analyser audit \
   --log-file audit-debug.log
 ```
 
+### Use full Presidio NER
+
+By default, Presidio uses fast deterministic recognisers for very large values to avoid running spaCy NER over entire response bodies. To use the full NER on those values as well, use `--presidio-full-ner`.
+
+```bash
+data-flow-analyser audit \
+  --capture scenarios.flows \
+  --doc dpa.txt \
+  --presidio-full-ner \
+  --verbose
+```
+
+### Understand the reports
+
 Every audit writes both a JSON report and a Markdown report, and always prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
 
 ## Processing pipeline
 
 ```mermaid
 flowchart TD
-    A["Capture + policy documents"] --> B["Parse and normalise flows"]
+    A["Capture\nmitm flows · HAR"] --> B["Parse and normalise flows"]
+    R["Policy documents"]
 
     subgraph DET["Deterministic analysis"]
-        B --> C["Decode payloads\nJSON · Base64 · URL encoding"]
-        B --> D["Match controlled seed values\nPlaintext · hashes · Base64"]
-        B --> E["Analyse identifiers\nEntropy · cookies · lifetimes"]
-        B --> F["Detect fingerprint vectors\nQuery · headers · decoded bodies"]
-        B --> G["Profile endpoints\nDNS · GeoIP · Tracker Radar"]
-        C --> I["Structured technical evidence"]
-        D --> I
-        E --> I
-        F --> I
-        G --> I
-        M["Risk evaluator\nLikelihood × severity · fixed matrix"]
+        B --> C["<b>Decode payload values</b>\nRecursive JSON · Base64 · URL decoding"]
+        B --> D["<b>Match supplied seeds</b>\nPlaintext + case variants · MD5 · SHA-1 · SHA-256 · Base64"]
+        B --> F["<b>Analyse identifiers</b>\nGrouped entropy and cookie lifetime evidence"]
+        B --> G["<b>Detect fingerprint vectors</b>\nQuery · headers · decoded bodies"]
+        B --> H["<b>Profile endpoints</b>\nDNS · GeoIP · ASN · DDG Tracker Radar"]
+        D --> I["<b>Grouped personal-data flow mapping</b>"]
+        F --> J["<b>Technical evidence summary</b>"]
+        G --> J
+        H --> J
+        I --> J
     end
 
-    subgraph AI["AI-powered analysis"]
-        A --> H["Extract policy claims\nLLM document analysis"]
-        H --> J["Policy context"]
-        I --> K["Cross-reference audit\nLLM + rule-based storage checks"]
-        J --> K
-        K --> L["LLM proposes GDPR Recital 75\nharm categories and rating inputs"]
+    subgraph AI["AI-assisted analysis"]
+        C --> E["<b>Presidio personal data detection</b>\nNER + regex"]
+        E --> I
+        K["<b>Extract policy claims</b>\nLLM document analysis"]
+        K --> L["<b>Personal data processing claims</b>"]
+        J --> M["<b>Cross-reference audit</b>\nValidating technical evidence against policy claims"]
+        L --> M
+        M --> N["<b>Discrepancy evidence</b>\nPolicy comparisons and citations"]
+        N --> O["<b>LLM risk evaluation</b>\n Harm categories and likelihood/severity inputs"]
     end
+
+    R --> K
 
     subgraph OUT["Human-verifiable output"]
-        N["Risk inputs · score · level · evidence"]
-        O["JSON and Markdown reports"]
+        O --> P["<b>Deterministic risk evaluator</b>\nLikelihood × severity · fixed matrix"]
+        P --> Q["<b>JSON and Markdown reports</b>"]
     end
-
-    L --> M
-    M --> N
-    N --> O
 
     classDef input fill:#e8f1ff,stroke:#356ae6,color:#123;
     classDef analysis fill:#eef9f0,stroke:#3b8f52,color:#132;
     classDef model fill:#fff4df,stroke:#c77b16,color:#321;
     classDef output fill:#f3eaff,stroke:#7a45b5,color:#231;
 
-    class A input;
-    class B,C,D,E,F,G,I,M analysis;
-    class H,J,K,L model;
-    class N,O output;
+    class A,R input;
+    class B,C,D,F,G,H,I,J analysis;
+    class E,K,L,M,N,O model;
+    class P,Q output;
 ```
 
 ## Development and testing
@@ -312,22 +370,30 @@ For reproducible research, retain the capture file, policy-document versions, se
 
 ```text
 src/data_flow_analyser/
-├── cli.py                         Command-line interface
+├── cli.py                         Command-line interface and logging setup
+├── endpoint_inventory.py          Domain exclusion and endpoint helpers
+├── exporter.py                    JSON and Markdown report generation
 ├── pipeline.py                    End-to-end orchestration
-├── models/schemas.py              Shared evidence and report schemas
+├── models/
+│   ├── __init__.py
+│   └── schemas.py                 Shared flow, evidence, and report schemas
 ├── parsers/
+│   ├── __init__.py
 │   ├── har_converter.py            HAR-to-mitmproxy conversion
 │   ├── mitm_parser.py              mitmproxy flow and HAR parsing
 │   └── decoder.py                  Recursive payload decoding
 ├── engines/
-│   ├── endpoint_profiler.py        DNS, GeoIP, ASN, and tracker metadata
-│   ├── fingerprint_profiler.py     Fingerprint vector detection
-│   ├── entropy.py                  Entropy and cookie-lifetime analysis
-│   ├── seed_hasher.py              Controlled-value matching
-│   ├── storage_profiler.py         Cookie/policy reconciliation
+│   ├── __init__.py
+│   ├── cross_referencer.py         LLM evidence cross-reference and parsing
 │   ├── document_ingestor.py        LLM policy extraction
-│   └── cross_referencer.py         LLM evidence cross-reference
-└── exporter.py                     JSON and Markdown reports
+│   ├── endpoint_profiler.py        DNS, GeoIP, ASN, and Tracker Radar metadata
+│   ├── entropy.py                  Grouped identifier and cookie-lifetime analysis
+│   ├── fingerprint_profiler.py     Fingerprint vector and consent-phase analysis
+│   ├── presidio_detector.py        Seed-independent PII candidate detection
+│   ├── risk_evaluator.py           Deterministic likelihood/severity scoring
+│   ├── seed_hasher.py              Controlled-value and encoded/hash matching
+│   └── storage_profiler.py         Deterministic cookie/policy reconciliation
+└── __init__.py                     Package metadata
 ```
 
 ## License and research use

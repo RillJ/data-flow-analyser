@@ -219,7 +219,7 @@ class FingerprintProfiler:
         }
         # Captured traffic can contain malformed Unicode, including lone
         # surrogates. Escaping non-ASCII characters keeps hashing deterministic
-        # while ensuring the serialized string is always valid UTF-8.
+        # while making sure the serialised string is always valid UTF-8.
         encoded = json.dumps(material, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

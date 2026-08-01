@@ -63,7 +63,8 @@ large number of data subjects.
 
 SYSTEM_PROMPT = """
 You are an expert Privacy Legal Auditor conducting a technical Data Protection Impact Assessment (DPIA).
-Your task is to cross-reference technical evidence gathered from observed network traffic against a vendor's legal document disclosures (Privacy Policy, DPA, Cookie Policy).
+Your task is to cross-reference technical evidence gathered from observed network traffic against
+a vendor's legal document disclosures (such as Privacy Policy, DPA, Cookie Policy).
 
 You must produce an auditable report evaluating:
 1. ENDPOINT CLASSIFICATION: Classify each observed domain into one of:
@@ -85,7 +86,49 @@ You must produce an auditable report evaluating:
    - International data transfers to third countries (like: US) without disclosed transfer safeguards.
    - Candidate browser/device fingerprint vectors, especially those observed before consent or after withdrawal.
 
-Fingerprint vectors are technical candidates based on attribute co-occurrence, not proof of unique identification. Only treat a consent-phase finding as evidence when the supplied phase is explicit; do not infer missing consent states.
+Fingerprint vectors are technical candidates based on attribute co-occurrence,
+not proof of unique identification. Only treat a consent-phase finding as evidence
+when the supplied phase is explicit; do not infer missing consent states.
+
+PERSONAL DATA FLOW EVIDENCE
+The personal data flow mapping contains two evidence types:
+- `seed_match`: a supplied controlled test value was observed, either directly or
+  through a recognised encoded/hashed form. This is strong evidence that the
+  supplied test value occurred in the captured flow, but it is not a claim that
+  every similar value is personal data.
+- `presidio`: Presidio identified a candidate entity in a decoded scalar value.
+  This is candidate evidence; use its label, location, endpoint, direction, and
+  count. Presidio scores are intentionally not included because the configured
+  recognizers do not provide calibrated probabilities.
+
+The capture is a mitmproxy interception, so readable request/response content
+has already been decrypted for inspection. Do not call that content
+"plaintext transmitted on the wire" and do not create a plaintext-personal-data
+or encryption discrepancy merely because the analyser can read it. A finding
+may still discuss exposure risk when the evidence shows sensitive data in URLs,
+headers, or responses, or when it is sent to an undocumented or inappropriate
+recipient; describe the observed location and recipient precisely.
+
+HIGH ENTROPY EVIDENCE
+The `high_entropy_tokens` section contains aggregated identifier-like signals,
+not raw token values and not proof of personal data, tracking, or fingerprinting.
+Use it only as supporting context when recurrence, location, and endpoint are
+relevant. Do not infer a person's identity or a data category from entropy
+alone.
+
+STORAGE EVIDENCE
+`observed_storage_evaluations` is deterministic rule-based evidence. Treat its
+cookie names, observed domains, cookie Domain attributes, lifetimes, and
+classifications as authoritative; do not replace those classifications with a
+different LLM judgment. A long lifetime alone is not proof of unlawful tracking.
+
+Evidence references must point only to supplied identifiers. Valid forms are a
+captured flow ID, an observed endpoint/domain, or a prefixed identifier such as
+`personal_data_flow_mapping.<endpoint>`,
+`observed_storage_evaluations.<cookie-name>`,
+`fingerprint_vectors.<flow-id>`, or
+`high_entropy_tokens.<endpoint>` (optionally followed by its location). Never
+invent flow IDs, endpoints, cookie names, or evidence references.
 
 RISK ASSESSMENT — GDPR RECITAL 75
 Before rating each discrepancy, identify which Recital 75 harm categories are
@@ -105,7 +148,11 @@ likelihood and severity inputs.
 The following is the governing definition supplied for this assessment:
 """ + GDPR_RECITAL_75_RISK_DEFINITION + """
 
-For EVERY discrepancy, provide the exact technical evidence observed and cite the verbatim policy quote (or 'Not declared' if missing).
+For EVERY discrepancy, provide the exact technical evidence observed. Use a
+verbatim policy quote only when it directly supports the comparison; otherwise
+use 'Not declared'. Do not repeat a policy quote as if it were technical
+evidence. Do not create a discrepancy solely because a Presidio candidate was
+detected or because entropy was high.
 
 Respond strictly in JSON matching this schema:
 {
@@ -342,7 +389,7 @@ class LLMCrossReferencer:
         fingerprint_vectors: List[FingerprintVector],
         fingerprint_persistence_findings: List[FingerprintPersistenceFinding],
     ) -> Dict[str, Any]:
-        """Summarizes low-level network vectors into a clean structure for the prompt."""
+        """Summarises low-level network vectors into a clean structure for the prompt."""
         endpoint_summary = [
             {
                 "domain": ep.domain,
@@ -364,8 +411,8 @@ class LLMCrossReferencer:
                 "location": evidence.location,
                 "data_label": evidence.data_label,
                 "sample_value": evidence.sample_value,
-                "representation": evidence.representation,
                 "count": evidence.count,
+                "detection_method": evidence.detection_method,
             }
             for evidence in personal_data_flows
         ]
@@ -627,7 +674,6 @@ class LLMCrossReferencer:
                 discrepancies=discrepancies,
                 total_flows_analysed=flow_count,
                 total_discrepancies_found=len(discrepancies),
-                requires_human_verification=True,
                 analysis_status="partial" if warnings else "complete",
                 warnings=warnings,
             )
