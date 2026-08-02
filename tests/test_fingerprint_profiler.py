@@ -19,7 +19,7 @@ from data_flow_analyser.engines.fingerprint_profiler import (
     FingerprintProfiler,
     classify_consent_phase,
 )
-from data_flow_analyser.models.schemas import ConsentPhase, NetworkFlow
+from data_flow_analyser.models.schemas import ConsentOutcome, ConsentPhase, NetworkFlow
 
 
 def _flow(flow_id: str, timestamp: datetime) -> NetworkFlow:
@@ -57,14 +57,14 @@ def test_fingerprint_profiler_combines_query_header_and_decoded_body_attributes(
 
 def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
     profiler = FingerprintProfiler()
-    granted_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
+    decided_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
     withdrawn_at = datetime(2026, 6, 27, 11, tzinfo=timezone.utc)
     flows = [
         _flow("flow-consented", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
         _flow("flow-withdrawn", datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)),
     ]
 
-    vectors, findings = profiler.analyse_flows(flows, granted_at, withdrawn_at)
+    vectors, findings = profiler.analyse_flows(flows, decided_at, withdrawn_at, ConsentOutcome.NON_ESSENTIAL_GRANTED)
 
     assert len(vectors) == 2
     assert len(findings) == 1
@@ -74,6 +74,25 @@ def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
         ConsentPhase.CONSENTED,
         ConsentPhase.WITHDRAWN,
     }
+
+
+def test_fingerprint_profiler_reports_candidate_before_and_after_denied_decision():
+    profiler = FingerprintProfiler()
+    decided_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
+    flows = [
+        _flow("flow-before", datetime(2026, 6, 27, 9, 30, tzinfo=timezone.utc)),
+        _flow("flow-after-denial", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
+    ]
+
+    vectors, findings = profiler.analyse_flows(flows, decided_at)
+
+    assert [vector.consent_phase for vector in vectors] == [
+        ConsentPhase.PRE_CONSENT,
+        ConsentPhase.POST_DECISION_DENIED,
+    ]
+    assert len(findings) == 1
+    assert findings[0].observed_after_denial is True
+    assert findings[0].persists_after_denial is True
 
 
 def test_consent_phase_is_unknown_without_user_supplied_events():

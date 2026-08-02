@@ -77,22 +77,37 @@ The analyser looks for bundled fingerprinting attributes across:
 - Selected request headers and client hints, such as `User-Agent`, `Accept-Language`, viewport, device-memory, and `Sec-CH-UA-*` headers.
 - Recursively decoded JSON and form-like request bodies.
 
-The current taxonomy includes display, locale/time, hardware/OS, canvas, audio, WebGL, and system-capability signals. A request becomes a fingerprinting candidate when it bundles multiple relevant categories, with additional weight for canvas, audio, or WebGL signals.
+The current taxonomy includes display, locale/time, hardware/OS, canvas, audio, WebGL, and system-capability signals. A request becomes a fingerprinting candidate when it bundles multiple relevant categories:
 
-This is an explainable attribute-co-occurrence heuristic. It does not claim a measured number of uniqueness bits because that requires an external population-frequency baseline. The current version also does not generate synthetic browser variations or run browser automation.
+- Four or more distinct categories; or
+- At least two categories, including one high-signal category: canvas, audio, or WebGL.
+
+The candidate rule is intentionally conservative and explainable. A single `User-Agent` or screen-size value is common in ordinary browser traffic and is not enough on its own. A combination of several browser/device properties is more consistent with a fingerprinting vector, while canvas, audio, and WebGL receive additional weight because they can expose rendering or hardware-specific characteristics.
+
+Each vector also receives a heuristic score between `0.0` and `1.0`:
+
+```text
+score = min((0.1 × number_of_categories) +
+            (0.2 × number_of_high_signal_categories), 1.0)
+```
+
+The score is an evidence-strength indicator for this heuristic, not a probability that fingerprinting occurred and not a measure of browser uniqueness. For example, five observed categories with one high-signal category produce a score of `0.7` (`0.5 + 0.2`). A score of `1.0` means that the heuristic reached its reporting cap; it does not mean 100% certainty.
+
+This analyser does not estimate how rare a fingerprint is in the wider browser population. A population-frequency baseline would require an external dataset containing the prevalence of values such as screen sizes, WebGL renderers, languages, and device capabilities. That baseline could be used to calculate entropy or rarity, but it is not configured in the current version. The current score therefore measures the quantity and type of observed categories only. The analyser also does not generate synthetic browser variations or run browser automation.
 
 ### Consent-phase analysis
 
-Consent metadata is optional because not every capture contains pre-consent, consented, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps:
+Consent metadata is optional because not every capture contains pre-decision, post-decision, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps. The default outcome is `necessary_only`, matching the privacy-test setup where analytical consent is denied:
 
 - `pre_consent`
+- `post_decision_denied`
 - `consented`
 - `withdrawn`
 - `unknown`
 
 If timestamps are omitted, the tool does not assume that consent was denied. All flows remain `unknown` for consent-phase analysis.
 
-Identical fingerprint candidates observed in consented and withdrawn phases are reported as persistence findings. Missing phase data is reported as unknown; it is not treated as proof of compliance or non-compliance.
+Identical fingerprint candidates observed before the decision, after non-essential consent was denied, or across consented and withdrawn phases are reported as consent-phase findings. Missing phase data is reported as unknown; it is not treated as proof of compliance or non-compliance.
 
 ### Policy analysis and LLM cross-referencing
 
@@ -272,7 +287,8 @@ Provide consent-event timestamps when the capture contains those phases. Timesta
 data-flow-analyser audit \
   --capture scenarios.flows \
   --doc dpa.txt \
-  --consent-granted-at "2026-06-28T10:15:00+02:00" \
+  --consent-decided-at "2026-06-28T10:15:00+02:00" \
+  --consent-outcome necessary_only \
   --consent-withdrawn-at "2026-06-28T10:40:00+02:00"
 ```
 

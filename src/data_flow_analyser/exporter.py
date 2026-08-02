@@ -169,7 +169,7 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Browser and Device Fingerprinting Candidates\n")
-        md.append("_Candidates are heuristic signals from bundled browser/device attributes, not proof of unique fingerprinting. Review the attributes, endpoint, phase, and evidence locations._\n")
+        md.append("_Fingerprinting candidates are heuristic indicators based on the combination of browser and device attributes observed in network flows. The score reflects the number and type of fingerprinting categories detected; it is not a probability of fingerprinting or a measure of browser uniqueness._\n")
         summary = report.fingerprint_summary
         md.append(
             f"**Vectors analysed:** {summary.total_vectors}  "
@@ -199,9 +199,9 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Fingerprinting Consent-Phase Findings\n")
-        md.append("_Persistence findings are strongest when the same candidate continues after an explicitly recorded withdrawal. An `unknown` phase means timestamps were unavailable or inconclusive; it does not mean consent was denied._\n")
+        md.append("_Findings identify candidate fingerprinting before a consent decision or after non-essential consent was denied. An `unknown` phase means timestamps were unavailable or inconclusive; it does not mean consent was denied._\n")
         if not report.fingerprint_persistence_findings:
-            md.append("_No candidate vectors were observed in pre-consent or withdrawn phases._\n")
+            md.append("_No candidate vectors were observed before a consent decision, after non-essential consent was denied, or after withdrawal._\n")
         else:
             for finding in report.fingerprint_persistence_findings:
                 md.append(f"- **`{finding.endpoint}`** — {finding.reasoning}")

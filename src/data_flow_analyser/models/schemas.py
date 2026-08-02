@@ -130,12 +130,20 @@ class PersonalDataFlowEvidence(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ConsentPhase(str, Enum):
-    """Consent state inferred from user-supplied capture timestamps."""
+    """Consent state inferred from user-supplied capture metadata."""
 
     UNKNOWN = "unknown"
     PRE_CONSENT = "pre_consent"
+    POST_DECISION_DENIED = "post_decision_denied"
     CONSENTED = "consented"
     WITHDRAWN = "withdrawn"
+
+
+class ConsentOutcome(str, Enum):
+    """Outcome of the consent-banner decision for non-essential processing."""
+
+    NECESSARY_ONLY = "necessary_only"
+    NON_ESSENTIAL_GRANTED = "non_essential_granted"
 
 
 class FingerprintAttribute(BaseModel):
@@ -171,6 +179,8 @@ class FingerprintPersistenceFinding(BaseModel):
     observed_phases: List[ConsentPhase] = Field(default_factory=list)
     flow_ids: List[str] = Field(default_factory=list)
     observed_before_consent: bool = False
+    observed_after_denial: bool = False
+    persists_after_denial: bool = False
     observed_after_withdrawal: bool = False
     persists_after_withdrawal: bool = False
     reasoning: str

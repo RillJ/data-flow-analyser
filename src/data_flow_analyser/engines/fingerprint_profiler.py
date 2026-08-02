@@ -22,6 +22,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from data_flow_analyser.models.schemas import (
     ConsentPhase,
+    ConsentOutcome,
     FingerprintAttribute,
     FingerprintPersistenceFinding,
     FingerprintVector,
@@ -67,16 +68,19 @@ HIGH_SIGNAL_CATEGORIES = {"canvas", "audio", "webgl"}
 
 def classify_consent_phase(
     timestamp: datetime,
-    consent_granted_at: Optional[datetime] = None,
+    consent_decided_at: Optional[datetime] = None,
     consent_withdrawn_at: Optional[datetime] = None,
+    consent_outcome: ConsentOutcome = ConsentOutcome.NECESSARY_ONLY,
 ) -> ConsentPhase:
-    """Assign a flow to a phase using optional, user-supplied consent events."""
+    """Assign a flow to a phase using optional consent-banner metadata."""
     if consent_withdrawn_at and timestamp >= consent_withdrawn_at:
         return ConsentPhase.WITHDRAWN
-    if consent_granted_at:
-        if timestamp < consent_granted_at:
+    if consent_decided_at:
+        if timestamp < consent_decided_at:
             return ConsentPhase.PRE_CONSENT
-        return ConsentPhase.CONSENTED
+        if consent_outcome == ConsentOutcome.NON_ESSENTIAL_GRANTED:
+            return ConsentPhase.CONSENTED
+        return ConsentPhase.POST_DECISION_DENIED
     return ConsentPhase.UNKNOWN
 
 
@@ -86,14 +90,16 @@ class FingerprintProfiler:
     def analyse_flows(
         self,
         flows: Iterable[NetworkFlow],
-        consent_granted_at: Optional[datetime] = None,
+        consent_decided_at: Optional[datetime] = None,
         consent_withdrawn_at: Optional[datetime] = None,
+        consent_outcome: ConsentOutcome = ConsentOutcome.NECESSARY_ONLY,
     ) -> Tuple[List[FingerprintVector], List[FingerprintPersistenceFinding]]:
         vectors = [
             self.analyse_flow(
                 flow,
                 classify_consent_phase(
-                    flow.timestamp, consent_granted_at, consent_withdrawn_at
+                    flow.timestamp, consent_decided_at, consent_withdrawn_at,
+                    consent_outcome,
                 ),
             )
             for flow in flows
@@ -236,9 +242,11 @@ class FingerprintProfiler:
             phases = sorted({vector.consent_phase for vector in matching_vectors}, key=lambda phase: phase.value)
             phase_set = set(phases)
             before_consent = ConsentPhase.PRE_CONSENT in phase_set
+            after_denial = ConsentPhase.POST_DECISION_DENIED in phase_set
             after_withdrawal = ConsentPhase.WITHDRAWN in phase_set
+            persists_after_denial = before_consent and after_denial
             persists_after_withdrawal = after_withdrawal and ConsentPhase.CONSENTED in phase_set
-            if not (before_consent or after_withdrawal):
+            if not (before_consent or after_denial or after_withdrawal):
                 continue
             findings.append(
                 FingerprintPersistenceFinding(
@@ -247,11 +255,17 @@ class FingerprintProfiler:
                     observed_phases=phases,
                     flow_ids=[vector.flow_id for vector in matching_vectors],
                     observed_before_consent=before_consent,
+                    observed_after_denial=after_denial,
+                    persists_after_denial=persists_after_denial,
                     observed_after_withdrawal=after_withdrawal,
                     persists_after_withdrawal=persists_after_withdrawal,
                     reasoning=(
                         "Identical candidate vector observed in both consented and withdrawn phases."
                         if persists_after_withdrawal
+                        else "Identical candidate vector observed before the decision and after non-essential consent was denied."
+                        if persists_after_denial
+                        else "Candidate vector observed before the consent decision."
+                        if before_consent
                         else "Candidate vector observed in a phase without recorded consent."
                     ),
                 )

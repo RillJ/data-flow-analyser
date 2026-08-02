@@ -34,6 +34,7 @@ from data_flow_analyser.engines.presidio_detector import PresidioPersonalDataDet
 from data_flow_analyser.models.schemas import (
     AnalysisProvenance,
     CookieLongevityResult,
+    ConsentOutcome,
     FingerprintPersistenceFinding,
     FingerprintAnalysisSummary,
     FingerprintVector,
@@ -93,8 +94,9 @@ class AuditPipeline:
         documents: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         seed_data: Optional[Union[SeedData, Dict[str, str]]] = None,
         excluded_domains: Optional[Sequence[str]] = None,
-        consent_granted_at: Optional[datetime] = None,
+        consent_decided_at: Optional[datetime] = None,
         consent_withdrawn_at: Optional[datetime] = None,
+        consent_outcome: ConsentOutcome = ConsentOutcome.NECESSARY_ONLY,
     ) -> FullAuditReport:
         """
         Executes the full end-to-end privacy audit pipeline.
@@ -104,8 +106,9 @@ class AuditPipeline:
             documents: Single file path, text string, or sequence/list of file paths/texts.
             seed_data: User personal data key-value pairs or pre-computed SeedData.
             excluded_domains: Domains whose flows are removed before any analysis.
-            consent_granted_at: Optional timestamp at which the user gave consent.
+            consent_decided_at: Optional timestamp at which the user answered the consent banner.
             consent_withdrawn_at: Optional timestamp at which the user withdrew consent.
+            consent_outcome: Whether only necessary processing was allowed or non-essential consent was granted.
 
         Returns:
             FullAuditReport containing endpoint classifications and discrepancy cards.
@@ -117,7 +120,7 @@ class AuditPipeline:
         target_docs = documents
         if not target_docs:
             raise ValueError("Must provide at least one document or text input.")
-        self._validate_consent_timeline(consent_granted_at, consent_withdrawn_at)
+        self._validate_consent_timeline(consent_decided_at, consent_withdrawn_at)
         analysis_started_at = datetime.now(timezone.utc)
 
         path_str = str(target_flow_path)
@@ -203,8 +206,9 @@ class AuditPipeline:
         fingerprint_findings: List[FingerprintPersistenceFinding]
         fingerprint_vectors, fingerprint_findings = self.fingerprint_profiler.analyse_flows(
             flows,
-            consent_granted_at=consent_granted_at,
+            consent_decided_at=consent_decided_at,
             consent_withdrawn_at=consent_withdrawn_at,
+            consent_outcome=consent_outcome,
         )
         candidate_count = sum(vector.is_candidate for vector in fingerprint_vectors)
         fingerprint_summary = self._summarise_fingerprints(
@@ -362,17 +366,17 @@ class AuditPipeline:
 
     @staticmethod
     def _validate_consent_timeline(
-        consent_granted_at: Optional[datetime], consent_withdrawn_at: Optional[datetime]
+        consent_decided_at: Optional[datetime], consent_withdrawn_at: Optional[datetime]
     ) -> None:
         """Ensure optional consent events are timezone-aware and chronologically valid."""
         for name, timestamp in (
-            ("consent_granted_at", consent_granted_at),
+            ("consent_decided_at", consent_decided_at),
             ("consent_withdrawn_at", consent_withdrawn_at),
         ):
             if timestamp and timestamp.tzinfo is None:
                 raise ValueError(f"{name} must include a timezone offset.")
-        if consent_granted_at and consent_withdrawn_at and consent_withdrawn_at < consent_granted_at:
-            raise ValueError("consent_withdrawn_at must be after consent_granted_at.")
+        if consent_decided_at and consent_withdrawn_at and consent_withdrawn_at < consent_decided_at:
+            raise ValueError("consent_withdrawn_at must be after consent_decided_at.")
 
     def _aggregate_documents(
         self, documents: Union[str, Path, Sequence[Union[str, Path]]]

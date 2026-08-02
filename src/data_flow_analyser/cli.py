@@ -29,6 +29,7 @@ from data_flow_analyser.exporter import ReportExporter
 from data_flow_analyser.pipeline import AuditPipeline
 from data_flow_analyser.endpoint_inventory import inventory_flows, load_excluded_domains
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
+from data_flow_analyser.models.schemas import ConsentOutcome
 
 app = typer.Typer(help="Data Flow Analyser command-line interface.")
 console = Console()
@@ -226,10 +227,15 @@ def audit(
         "--presidio-full-ner",
         help="Run spaCy NER on large values too; slower, but may improve accuracy.",
     ),
-    consent_granted_at: Optional[str] = typer.Option(
+    consent_decided_at: Optional[str] = typer.Option(
         None,
-        "--consent-granted-at",
-        help="ISO-8601 timestamp when consent was granted (for example 2026-08-13T10:15:00+02:00).",
+        "--consent-decided-at",
+        help="ISO-8601 timestamp when the consent banner was answered (for example 2026-08-13T10:15:00+02:00).",
+    ),
+    consent_outcome: ConsentOutcome = typer.Option(
+        ConsentOutcome.NECESSARY_ONLY,
+        "--consent-outcome",
+        help="Outcome for non-essential processing: necessary_only or non_essential_granted.",
     ),
     consent_withdrawn_at: Optional[str] = typer.Option(
         None,
@@ -254,11 +260,11 @@ def audit(
     configure_logging(verbose, log_output_path)
     logger.info("Logging to %s (verbose=%s)", log_output_path, verbose)
 
-    granted_at = parse_iso8601_timestamp(consent_granted_at, "--consent-granted-at")
+    decided_at = parse_iso8601_timestamp(consent_decided_at, "--consent-decided-at")
     withdrawn_at = parse_iso8601_timestamp(consent_withdrawn_at, "--consent-withdrawn-at")
-    if granted_at and withdrawn_at and withdrawn_at < granted_at:
+    if decided_at and withdrawn_at and withdrawn_at < decided_at:
         raise typer.BadParameter(
-            "must be after --consent-granted-at",
+            "must be after --consent-decided-at",
             param_hint="--consent-withdrawn-at",
         )
 
@@ -292,8 +298,9 @@ def audit(
             documents=doc,
             seed_data=seed_data,
             excluded_domains=sorted(excluded_domains),
-            consent_granted_at=granted_at,
+            consent_decided_at=decided_at,
             consent_withdrawn_at=withdrawn_at,
+            consent_outcome=consent_outcome,
         )
 
     markdown_str = ReportExporter.to_markdown(report)
