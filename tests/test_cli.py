@@ -3,6 +3,7 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
+import json
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
@@ -74,3 +75,66 @@ def test_audit_allows_explicit_log_file(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert explicit_log.is_file()
     assert not list(tmp_path.glob("audit-*.log"))
+
+
+def test_endpoints_exports_timestamped_json_and_markdown_and_displays_table(
+    tmp_path, monkeypatch
+):
+    flow_file = tmp_path / "capture.flow"
+    flow_file.write_text("mock capture", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    inventory = [{
+        "domain": "api.example.com",
+        "flow_count": 2,
+        "methods": {"GET": 2},
+        "paths": {"/collect": 2},
+        "first_seen": "2026-01-01T00:00:00+00:00",
+        "last_seen": "2026-01-01T00:01:00+00:00",
+    }]
+
+    with (
+        patch("data_flow_analyser.cli.parse_flow_file", return_value=[]),
+        patch("data_flow_analyser.cli.inventory_flows", return_value=inventory),
+    ):
+        result = runner.invoke(app, ["endpoints", "--capture", str(flow_file)])
+
+    assert result.exit_code == 0, result.stdout
+    assert "api.example.com" in result.stdout
+    json_files = list(tmp_path.glob("endpoints-*.json"))
+    markdown_files = list(tmp_path.glob("endpoints-*.md"))
+    assert len(json_files) == 1
+    assert len(markdown_files) == 1
+    assert json.loads(json_files[0].read_text(encoding="utf-8"))["endpoints"] == inventory
+    assert "# Endpoint Inventory" in markdown_files[0].read_text(encoding="utf-8")
+
+
+def test_endpoints_allows_explicit_json_and_markdown_paths(tmp_path, monkeypatch):
+    flow_file = tmp_path / "capture.flow"
+    flow_file.write_text("mock capture", encoding="utf-8")
+    explicit_json = tmp_path / "exports" / "inventory.json"
+    explicit_markdown = tmp_path / "exports" / "inventory.md"
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("data_flow_analyser.cli.parse_flow_file", return_value=[]),
+        patch("data_flow_analyser.cli.inventory_flows", return_value=[]),
+    ):
+        result = runner.invoke(
+            app,
+            [
+                "endpoints",
+                "--capture",
+                str(flow_file),
+                "--out-json",
+                str(explicit_json),
+                "--out-md",
+                str(explicit_markdown),
+            ],
+        )
+
+    assert result.exit_code == 0, result.stdout
+    assert explicit_json.is_file()
+    assert explicit_markdown.is_file()
+    assert not list(tmp_path.glob("endpoints-*.json"))
+    assert not list(tmp_path.glob("endpoints-*.md"))

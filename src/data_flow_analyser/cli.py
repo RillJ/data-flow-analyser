@@ -98,6 +98,35 @@ def healthcheck() -> None:
     console.print(Panel("Data Flow Analyser engine ready", style="green"))
 
 
+def endpoint_inventory_to_markdown(payload: dict) -> str:
+    """Render a deterministic endpoint inventory as Markdown."""
+    lines = [
+        "# Endpoint Inventory",
+        "",
+        f"**Capture:** `{payload['capture']}`  ",
+        f"**Flows:** {payload['flow_count']}  ",
+        f"**Endpoints:** {payload['endpoint_count']}",
+        "",
+        "| Domain | Flows | Methods | Paths | First Seen | Last Seen |",
+        "| --- | ---: | --- | --- | --- | --- |",
+    ]
+    if not payload["endpoints"]:
+        lines.append("| _None_ | 0 |  |  |  |  |")
+    else:
+        for item in payload["endpoints"]:
+            methods = ", ".join(
+                f"{name} ({count})" for name, count in item["methods"].items()
+            )
+            paths = ", ".join(
+                f"`{path}` ({count})" for path, count in item["paths"].items()
+            )
+            lines.append(
+                f"| `{item['domain']}` | {item['flow_count']} | {methods} | {paths} | "
+                f"{item['first_seen'] or 'Unknown'} | {item['last_seen'] or 'Unknown'} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
 @app.command("endpoints")
 def endpoints(
     flows: Path = typer.Option(
@@ -115,6 +144,11 @@ def endpoints(
         "--out-json",
         help="Path to write the endpoint inventory as JSON.",
     ),
+    out_md: Optional[Path] = typer.Option(
+        None,
+        "--out-md",
+        help="Path to write the endpoint inventory as Markdown.",
+    ),
 ) -> None:
     """List every destination host in a capture for exclusion review."""
     parsed_flows = parse_flow_file(flows)
@@ -126,11 +160,19 @@ def endpoints(
         "endpoints": inventory,
     }
 
-    if out_json:
-        out_json.parent.mkdir(parents=True, exist_ok=True)
-        out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        console.print(f"[bold green]✓[/bold green] Endpoint inventory written to: {out_json}")
-        return
+    output_stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    json_output_path = out_json or Path.cwd() / f"endpoints-{output_stamp}.json"
+    markdown_output_path = out_md or Path.cwd() / f"endpoints-{output_stamp}.md"
+
+    json_output_path.parent.mkdir(parents=True, exist_ok=True)
+    json_output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print(f"[bold green]✓[/bold green] Endpoint inventory written to: {json_output_path}")
+
+    markdown_output_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_output_path.write_text(
+        endpoint_inventory_to_markdown(payload), encoding="utf-8"
+    )
+    console.print(f"[bold green]✓[/bold green] Endpoint inventory written to: {markdown_output_path}")
 
     table = Table(title=f"Endpoints in {flows}")
     table.add_column("Domain")

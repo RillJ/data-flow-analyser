@@ -214,10 +214,13 @@ Before an audit, use the deterministic endpoint inventory command to review ever
 ```bash
 data-flow-analyser endpoints \
   --capture scenarios.flows \
-  --out-json endpoints.json
+  --out-json endpoints.json \
+  --out-md endpoints.md
 ```
 
 The inventory includes flow counts, methods, paths, and first/last observation times. Use it to create an optional exclusion file for browser, Mozilla, extension, or other researcher-identified traffic:
+
+The command displays the endpoint table in the terminal and writes both JSON and Markdown inventories. Use `--out-json` and/or `--out-md` to choose explicit paths. If omitted, both files are written to the current directory as `endpoints-YYYYMMDD-HHMMSS.json` and `endpoints-YYYYMMDD-HHMMSS.md`.
 
 ```json
 {
@@ -318,7 +321,8 @@ data-flow-analyser audit \
 
 ### Understand the reports
 
-Every audit writes both a JSON report and a Markdown report, and always prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
+Every audit writes both a JSON report and a Markdown report, and prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
+
 Every audit also writes diagnostics to `audit-YYYYMMDD-HHMMSS.log` in the current directory. Use `--log-file` to choose an explicit path; use `--verbose` when the log should include the full pipeline trace and exact LLM prompts.
 
 ## Processing pipeline
