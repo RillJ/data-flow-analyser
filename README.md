@@ -1,6 +1,6 @@
 # Beyond the Banner: AI-Powered Network Traffic Analysis for Privacy Risk Detection
 
-`data-flow-analyser` is an open-source, AI-assisted command-line tool for analysing captured HTTP(S) traffic from privacy-testing scenarios. It is designed to support technical privacy assessments and Data Protection Impact Assessments (DPIAs) by making observed data flows easier to inspect, classify, and compare with vendor documentation.
+`data-flow-analyser` is an open-source, AI-powered command-line tool for analysing captured HTTP(S) traffic from privacy-testing scenarios. It is designed to support technical privacy assessments and Data Protection Impact Assessments (DPIAs) by making observed data flows easier to inspect, classify, and compare with vendor documentation.
 
 The tool analyses what a service actually sends over the network. It does not replace a privacy expert or make definitive legal determinations. Its output is an evidence-based risk map for human verification.
 
@@ -12,7 +12,7 @@ The central research question is:
 
 > How can an AI-based open-source tool automate the analysis of network traffic data, generated from privacy testing scenarios, to efficiently identify and assess privacy risks within the context of DPIAs?
 
-The current implementation contributes to that question by combining deterministic traffic analysis with LLM-assisted document extraction and cross-referencing. The deterministic stages preserve technical evidence; the LLM is used to interpret structured evidence against policy claims.
+The current implementation contributes to that question by combining deterministic traffic analysis with Large Language Model (LLM) powered document extraction + cross-referencing and Named Entity Recognition (NER) personal data identification. The deterministic stages preserve technical evidence; the LLM is used to interpret structured evidence against policy claims. The tool is fully self-serving: feed it the necessary data, and an entire report rolls out, subject to human evaluation.
 
 ## Current capabilities
 
@@ -25,10 +25,9 @@ The current implementation contributes to that question by combining determinist
 - Recursively decodes JSON, Base64, and URL-encoded payloads where possible.
 - Skips unsupported or malformed flows with diagnostic logging.
 
-
 ### Personal data flow and identifier detection
 
-Identifying which data is sent to which endpoint helps reviewers connect observed technical behaviour to privacy risks, policy claims, and possible international transfers. The deterministic detectors preserve the underlying traffic evidence, while the AI-assisted stages help organise and compare that evidence with the supplied policy documents.
+Identifying which data is sent to which endpoint helps reviewers connect observed technical behaviour to privacy risks, policy claims, and possible international transfers. The deterministic detectors preserve the underlying traffic evidence, while the AI-powered stages help organise and compare that evidence with the supplied policy documents.
 
 #### Seed matching
 Optional seed values can be supplied through a JSON file. For each seed, the analyser generates plaintext, case variants, MD5, SHA-1, SHA-256, and Base64 lookup values. It scans request and response URLs, headers, bodies, and cookies, including recursively decoded JSON, URL-encoded, and Base64-wrapped payloads.
@@ -68,7 +67,7 @@ The storage profiler inventories observed cookie names from sent and set cookies
 - The network hosts where each cookie was observed being set or sent.
 - The optional `Domain=` attribute declared in `Set-Cookie` headers.
 
-Cookies with a parsed lifetime longer than 90 days are flagged by the rule-based analyser. This is an analytical threshold, not a legal conclusion.
+Cookies with a parsed lifetime longer than 90 days are flagged by the deterministic analyser. This is an analytical threshold, not a legal conclusion.
 
 ### Browser and device fingerprinting candidates
 
@@ -91,7 +90,7 @@ Consent metadata is optional because not every capture contains pre-consent, con
 - `withdrawn`
 - `unknown`
 
-If timestamps are omitted, the tool does **not** assume that consent was denied. All flows remain `unknown` for consent-phase analysis.
+If timestamps are omitted, the tool does not assume that consent was denied. All flows remain `unknown` for consent-phase analysis.
 
 Identical fingerprint candidates observed in consented and withdrawn phases are reported as persistence findings. Missing phase data is reported as unknown; it is not treated as proof of compliance or non-compliance.
 
@@ -99,13 +98,13 @@ Identical fingerprint candidates observed in consented and withdrawn phases are 
 
 The document ingestor sends the complete aggregated policy/DPA text by default to an LLM and extracts:
 
-- Declared personal-data categories.
+- Declared personal data categories.
 - Declared subprocessors.
 - Declared cookies and storage mechanisms.
 - International-transfer mechanisms.
 - Retention statements.
 
-The cross-referencer then receives structured policy claims together with observed endpoints, grouped personal-data flow mappings, grouped identifier signals, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
+The cross-referencer then receives structured policy claims together with observed endpoints, grouped personal data flow mappings, grouped identifier signals, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
 
 ### Indicative risk evaluation
 
@@ -141,7 +140,7 @@ The risk score is `likelihood × severity`. The indicative matrix is:
 
 These levels are indications for human review, not definitive legal conclusions. The Markdown and JSON reports include the inputs, score, indicative level, potential harms, assessment basis, and a human-verification flag.
 
-LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, grouped personal-data mappings, grouped entropy signals, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
+LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, grouped personal data mappings, grouped entropy signals, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
 
 ### Reproducibility
 
@@ -151,7 +150,7 @@ For research runs, retain the capture, policy-document versions, seed-file versi
 
 ### Debugging
 
-With `--verbose`, the exact system and user prompts sent to both LLM calls are written to the console. With `--log-file`, they can be retained for reproducibility. Because these prompts can contain complete policy documents and traffic-derived values, log files must be protected as sensitive research data.
+With `--verbose`, the exact system and user prompts sent to both LLM calls are written to the console and retained in the automatically generated `audit-YYYYMMDD-HHMMSS.log` file. Use `--log-file` to choose an explicit log path. Because these prompts can contain complete policy documents and traffic-derived values, log files must be protected as sensitive research data.
 
 ## Installation
 
@@ -163,7 +162,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-For seed-independent personal-data detection, install the spaCy model matching the language you want to analyse. For Dutch:
+For seed-independent personal data detection, install the spaCy model matching the language you want to analyse. For Dutch:
 
 ```bash
 python -m spacy download nl_core_news_lg
@@ -304,39 +303,44 @@ data-flow-analyser audit \
 ### Understand the reports
 
 Every audit writes both a JSON report and a Markdown report, and always prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
+Every audit also writes diagnostics to `audit-YYYYMMDD-HHMMSS.log` in the current directory. Use `--log-file` to choose an explicit path; use `--verbose` when the log should include the full pipeline trace and exact LLM prompts.
 
 ## Processing pipeline
 
 ```mermaid
 flowchart TD
-    A["Capture\nmitm flows · HAR"] --> B["Parse and normalise flows"]
-    R["Policy documents"]
+    A["<b>Capture</b>\nmitm flows · HAR"] --> B["<b>Parse, normalise, and decode flows</b>\nRequest/response bodies · Recursive JSON · Base64"]
+    R["<b>Policy documents</b>"] --> K["<b>Extract policy claims</b>\nLLM document analysis"]
+
+    A --> X["<b>Endpoint inventory command</b>\nReview domains, counts, methods, paths"]
+    X --> X1["<b>Researcher selects domains to ignore</b>"]
+    X1 --> X2["<b>Domain analysis exclusion JSON file</b>"]
+    X2 -. "optional" .-> B
+
+    S["<b>Seed input JSON</b>\nPersonal data strings"] -. "optional" .-> D
 
     subgraph DET["Deterministic analysis"]
-        B --> C["<b>Decode payload values</b>\nRecursive JSON · Base64 · URL decoding"]
-        B --> D["<b>Match supplied seeds</b>\nPlaintext + case variants · MD5 · SHA-1 · SHA-256 · Base64"]
-        B --> F["<b>Analyse identifiers</b>\nGrouped entropy and cookie lifetime evidence"]
-        B --> G["<b>Detect fingerprint vectors</b>\nQuery · headers · decoded bodies"]
-        B --> H["<b>Profile endpoints</b>\nDNS · GeoIP · ASN · DDG Tracker Radar"]
-        D --> I["<b>Grouped personal-data flow mapping</b>"]
+        B --> T["<b>Apply optional domain exclusions</b>\nExact domain + subdomains"]
+        T --> D["<b>Match supplied seeds</b>\nPlaintext + case variants · MD5 · SHA-1 · SHA-256 · Base64"]
+        T --> F["<b>Analyse identifiers</b>\nGrouped entropy and cookie lifetime evidence"]
+        T --> G["<b>Detect fingerprint vectors</b>\nQuery · headers · decoded bodies"]
+        T --> H["<b>Profile endpoints</b>\nDNS · GeoIP · ASN · DDG Tracker Radar"]
+        D --> I["<b>Grouped personal data flow mapping</b>"]
         F --> J["<b>Technical evidence summary</b>"]
         G --> J
         H --> J
         I --> J
     end
 
-    subgraph AI["AI-assisted analysis"]
-        C --> E["<b>Presidio personal data detection</b>\nNER + regex"]
-        E --> I
-        K["<b>Extract policy claims</b>\nLLM document analysis"]
+    subgraph AI["AI-powered analysis"]
+        T --> C["<b>Detect personal data candidates</b>\nPresidio NER + regex"]
+        C --> I
         K --> L["<b>Personal data processing claims</b>"]
-        J --> M["<b>Cross-reference audit</b>\nValidating technical evidence against policy claims"]
+        J --> M["<b>LLM cross-reference audit</b>\nValidating technical evidence against policy claims"]
         L --> M
         M --> N["<b>Discrepancy evidence</b>\nPolicy comparisons and citations"]
-        N --> O["<b>LLM risk evaluation</b>\n Harm categories and likelihood/severity inputs"]
+        N --> O["<b>LLM risk evaluation</b>\nGDPR Recital 75 · UK ICO risk method"]
     end
-
-    R --> K
 
     subgraph OUT["Human-verifiable output"]
         O --> P["<b>Deterministic risk evaluator</b>\nLikelihood × severity · fixed matrix"]
@@ -348,9 +352,9 @@ flowchart TD
     classDef model fill:#fff4df,stroke:#c77b16,color:#321;
     classDef output fill:#f3eaff,stroke:#7a45b5,color:#231;
 
-    class A,R input;
-    class B,C,D,F,G,H,I,J analysis;
-    class E,K,L,M,N,O model;
+    class A,R,X,X1,X2,S input;
+    class B,T,D,F,G,H,I,J analysis;
+    class C,K,L,M,N,O model;
     class P,Q output;
 ```
 
@@ -361,8 +365,6 @@ Run the test suite from the project virtual environment:
 ```bash
 .venv/bin/python -m pytest -q
 ```
-
-The test suite covers decoding, entropy and cookie-lifetime analysis, seed matching, endpoint profiling, document ingestion, cross-referencing, pipeline execution, fingerprint-vector/consent-phase analysis, and the deterministic ICO-style risk evaluator.
 
 For reproducible research, retain the capture file, policy-document versions, seed-file version, consent timestamps, model/provider configuration, verbose logfile, and generated JSON report together. External endpoint metadata should also be treated as time-dependent evidence.
 

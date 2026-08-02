@@ -245,13 +245,14 @@ def audit(
     log_file: Optional[Path] = typer.Option(
         None,
         "--log-file",
-        help="Write diagnostics to this file (use with --verbose for a full trace).",
+        help="Write diagnostics to this file; defaults to audit-YYYYMMDD-HHMMSS.log in the current directory.",
     ),
 ) -> None:
     """Run an end-to-end technical privacy cross-reference audit."""
-    configure_logging(verbose, log_file)
-    if log_file:
-        logger.info("Logging to %s (verbose=%s)", log_file, verbose)
+    output_stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    log_output_path = log_file or Path.cwd() / f"audit-{output_stamp}.log"
+    configure_logging(verbose, log_output_path)
+    logger.info("Logging to %s (verbose=%s)", log_output_path, verbose)
 
     granted_at = parse_iso8601_timestamp(consent_granted_at, "--consent-granted-at")
     withdrawn_at = parse_iso8601_timestamp(consent_withdrawn_at, "--consent-withdrawn-at")
@@ -296,7 +297,6 @@ def audit(
         )
 
     markdown_str = ReportExporter.to_markdown(report)
-    output_stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     json_output_path = out_json or Path.cwd() / f"audit-{output_stamp}.json"
     markdown_output_path = out_md or Path.cwd() / f"audit-{output_stamp}.md"
 
