@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.engines.document_ingestor import PolicyDocumentIngestor
@@ -52,6 +52,22 @@ from data_flow_analyser.endpoint_inventory import host_is_excluded
 from data_flow_analyser.engines.endpoint_profiler import normalise_domain, unique_hosts
 
 logger = logging.getLogger("data_flow_analyser.pipeline")
+
+# These are deliberately coarse-grained: they represent work the user can
+# understand, rather than implementation details that would make the CLI
+# progress display noisy or brittle.
+PIPELINE_STAGES = (
+    "Parsing network capture",
+    "Profiling endpoints",
+    "Matching personal data",
+    "Detecting personal data",
+    "Analysing identifiers",
+    "Analysing fingerprint signals",
+    "Reading disclosure documents",
+    "Analysing disclosure documents",
+    "Cross-referencing evidence",
+    "Finalising report",
+)
 
 
 class AuditPipeline:
@@ -97,6 +113,7 @@ class AuditPipeline:
         consent_decided_at: Optional[datetime] = None,
         consent_withdrawn_at: Optional[datetime] = None,
         consent_outcome: ConsentOutcome = ConsentOutcome.NECESSARY_ONLY,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> FullAuditReport:
         """
         Executes the full end-to-end privacy audit pipeline.
@@ -123,7 +140,12 @@ class AuditPipeline:
         self._validate_consent_timeline(consent_decided_at, consent_withdrawn_at)
         analysis_started_at = datetime.now(timezone.utc)
 
+        def report_progress(stage: str) -> None:
+            if progress_callback:
+                progress_callback(stage)
+
         path_str = str(target_flow_path)
+        report_progress(PIPELINE_STAGES[0])
         logger.info(f"Loading and parsing network capture file: {path_str}")
         flows: List[NetworkFlow] = parse_flow_file(path_str)
         exclusions = {normalise_domain(domain.removeprefix("*.")) for domain in (excluded_domains or [])}
@@ -145,6 +167,7 @@ class AuditPipeline:
             )
 
         # Profile observed endpoints
+        report_progress(PIPELINE_STAGES[1])
         endpoints: List[ObservedEndpoint] = self._profile_endpoints(flows)
         logger.info(f"Profiled {len(endpoints)} unique domain endpoints.")
         for endpoint in endpoints:
@@ -158,6 +181,7 @@ class AuditPipeline:
             )
 
         # Personal data seed matching
+        report_progress(PIPELINE_STAGES[2])
         seed_matches: List[Dict[str, Any]] = self._scan_seed_matches(flows, seed_data)
         personal_data_flows = self._group_personal_data_flows(seed_matches)
         if seed_matches:
@@ -168,12 +192,14 @@ class AuditPipeline:
         logger.debug("Seed matching complete: occurrences=%d groups=%d", len(seed_matches), len(personal_data_flows))
 
         # Seed-independent personal-data candidate detection on decoded values.
+        report_progress(PIPELINE_STAGES[3])
         presidio_matches = self.presidio_detector.detect_flows(flows)
         personal_data_flows = self._group_personal_data_flows(seed_matches + presidio_matches)
         if presidio_matches:
             logger.info("Detected %d additional Presidio personal data candidates.", len(presidio_matches))
 
         # Entropy tokens & cookie longevity
+        report_progress(PIPELINE_STAGES[4])
         entropy_tokens: List[TrackingToken] = []
         cookie_results: List[CookieLongevityResult] = []
 
@@ -204,6 +230,7 @@ class AuditPipeline:
 
         fingerprint_vectors: List[FingerprintVector]
         fingerprint_findings: List[FingerprintPersistenceFinding]
+        report_progress(PIPELINE_STAGES[5])
         fingerprint_vectors, fingerprint_findings = self.fingerprint_profiler.analyse_flows(
             flows,
             consent_decided_at=consent_decided_at,
@@ -220,15 +247,18 @@ class AuditPipeline:
         )
 
         # Ingest disclosure document(s)
+        report_progress(PIPELINE_STAGES[6])
         combined_text, auto_title = self._aggregate_documents(target_docs)
         logger.info(f"Analysing documentation: '{auto_title}' ({len(combined_text)} chars)")
 
+        report_progress(PIPELINE_STAGES[7])
         doc_analysis = self.doc_ingestor.analyse_document_text(
             text_content=combined_text,
             document_title=auto_title,
         )
 
         # Cross-reference technical evidence vs. declared claims
+        report_progress(PIPELINE_STAGES[8])
         logger.info("Executing LLM technical cross-referencing audit...")
         report = self.cross_referencer.cross_reference_audit(
             doc_analysis=doc_analysis,
@@ -279,6 +309,7 @@ class AuditPipeline:
             excluded_domains=sorted(exclusions),
         )
 
+        report_progress(PIPELINE_STAGES[9])
         logger.info(f"Audit completed. Found {report.total_discrepancies_found} discrepancies.")
         return report
 

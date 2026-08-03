@@ -97,7 +97,7 @@ This analyser does not estimate how rare a fingerprint is in the wider browser p
 
 ### Consent-phase analysis
 
-Consent metadata is optional because not every capture contains pre-decision, post-decision, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps. The default outcome is `necessary_only`, matching the privacy-test setup where analytical consent is denied:
+Consent metadata is optional because not every capture contains pre-decision, post-decision, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps. The default outcome is `necessary_only` with `non_essential_granted` as an alternative option:
 
 - `pre_consent`
 - `post_decision_denied`

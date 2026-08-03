@@ -22,11 +22,12 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
 from data_flow_analyser import __version__
 from data_flow_analyser.exporter import ReportExporter
-from data_flow_analyser.pipeline import AuditPipeline
+from data_flow_analyser.pipeline import AuditPipeline, PIPELINE_STAGES
 from data_flow_analyser.endpoint_inventory import inventory_flows, load_excluded_domains
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
 from data_flow_analyser.models.schemas import ConsentOutcome
@@ -310,7 +311,35 @@ def audit(
             param_hint="--consent-withdrawn-at",
         )
 
-    with console.status("[bold green]Executing privacy audit pipeline...", spinner="dots"):
+    progress: Optional[Progress] = None
+    progress_task_id = None
+
+    def update_progress(stage: str) -> None:
+        if progress is not None and progress_task_id is not None:
+            progress.update(progress_task_id, advance=1, description=stage)
+
+    progress_context = (
+        Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+            transient=False,
+        )
+        if not verbose
+        else None
+    )
+
+    with progress_context or console.status(
+        "[bold green]Executing privacy audit pipeline...", spinner="dots"
+    ):
+        if progress_context is not None:
+            progress = progress_context
+            progress_task_id = progress.add_task(
+                PIPELINE_STAGES[0], total=len(PIPELINE_STAGES)
+            )
         pipeline = AuditPipeline(
             llm_model=model,
             temperature=temperature,
@@ -343,7 +372,15 @@ def audit(
             consent_decided_at=decided_at,
             consent_withdrawn_at=withdrawn_at,
             consent_outcome=consent_outcome,
+            progress_callback=update_progress if not verbose else None,
         )
+
+        if progress is not None and progress_task_id is not None:
+            progress.update(
+                progress_task_id,
+                completed=len(PIPELINE_STAGES),
+                description="Audit complete",
+            )
 
     markdown_str = ReportExporter.to_markdown(report)
     json_output_path = out_json or Path.cwd() / f"audit-{output_stamp}.json"
