@@ -54,7 +54,12 @@ IGNORED_NER_LABELS = [
 # Presidio setup. NER is useful for short human-readable values, but it is the
 # expensive part of scanning large HTML/JSON responses. Regex/checksum-based
 # recognisers remain useful on those large values (emails, IPs, IBANs, etc.).
-NER_ENTITY_TYPES = {"PERSON", "LOCATION", "DATE_TIME", "NRP", "ORG"}
+# The names below match Presidio's actual spaCy recogniser labels (not spaCy's
+# raw labels, e.g. ORGANIZATION rather than ORG).
+NER_ENTITY_TYPES = {
+    "PERSON", "LOCATION", "DATE_TIME", "NRP", "EMAIL", "ID", "AGE",
+    "ORGANIZATION",
+}
 
 
 class PresidioPersonalDataDetector:
@@ -87,7 +92,10 @@ class PresidioPersonalDataDetector:
         self.entities: Optional[List[str]] = None
         self._non_ner_entities: Optional[List[str]] = None
         self.warning: Optional[str] = None
-        self._analysis_cache: Dict[str, List[Tuple[str, int, int, float]]] = {}
+        # Cached spans contain entity type, start offset, and end offset.
+        # Scores are intentionally not retained because callers only need the
+        # matched span and the cache is also used by the deterministic path.
+        self._analysis_cache: Dict[str, List[Tuple[str, int, int]]] = {}
         self._limit_reached = False
         try:
             from presidio_analyzer import AnalyzerEngine
@@ -99,10 +107,13 @@ class PresidioPersonalDataDetector:
                     f"Unsupported Presidio language '{language}'. "
                     f"Supported configured languages: {', '.join(sorted(SPACY_MODELS))}."
                 )
-            # Presidio has its own verbose logger. Keep this tool's progress
-            # logs visible without flooding --verbose output with recogniser
-            # internals for every scalar value.
-            logging.getLogger("presidio-analyzer").setLevel(logging.WARNING)
+            # Presidio loads recognisers for several countries while building
+            # its default registry, even when only one language is configured.
+            # Those startup messages are harmless. Suppress them during setup
+            # while keeping genuine runtime warnings visible.
+            presidio_logger = logging.getLogger("presidio-analyzer")
+            previous_presidio_level = presidio_logger.level
+            presidio_logger.setLevel(logging.ERROR)
             nlp_provider = NlpEngineProvider(
                 nlp_configuration={
                     "nlp_engine_name": "spacy",
@@ -112,13 +123,24 @@ class PresidioPersonalDataDetector:
                     },
                 }
             )
-            self.analyser = AnalyzerEngine(nlp_engine=nlp_provider.create_engine())
-            self.deterministic_analyser = AnalyzerEngine(
-                nlp_engine=NoOpNlpEngine(
-                    [{"lang_code": language, "model_name": "presidio-no-op"}]
-                ),
-                supported_languages=[language],
-            )
+            try:
+                self.analyser = AnalyzerEngine(
+                    nlp_engine=nlp_provider.create_engine(),
+                    supported_languages=[language],
+                )
+                self.deterministic_analyser = AnalyzerEngine(
+                    nlp_engine=NoOpNlpEngine(
+                        [{"lang_code": language, "model_name": "presidio-no-op"}]
+                    ),
+                    supported_languages=[language],
+                )
+            finally:
+                # The no-op analyzer emits one INFO line per deterministic
+                # scan (and DEBUG timing for every recognizer). Keep warnings,
+                # but prevent large captures from flooding the terminal.
+                presidio_logger.setLevel(
+                    max(previous_presidio_level, logging.WARNING)
+                )
             try:
                 available_entities = self.analyser.get_supported_entities(language=language)
             except AttributeError:
@@ -134,9 +156,12 @@ class PresidioPersonalDataDetector:
             if not self.entities:
                 self.entities = None
             if self.entities is not None:
+                deterministic_entities = set(
+                    self.deterministic_analyser.get_supported_entities(language=language)
+                )
                 self._non_ner_entities = [
                     entity for entity in self.entities
-                    if entity not in NER_ENTITY_TYPES
+                    if entity not in NER_ENTITY_TYPES and entity in deterministic_entities
                 ]
             logger.info(
                 "Presidio entity scope: language=%s entities=%d",
@@ -252,7 +277,14 @@ class PresidioPersonalDataDetector:
                 if not entities:
                     self._analysis_cache[value] = []
                     return []
-            chunks = self._text_chunks(value) if self.full_ner else [(0, value)]
+            # Regex recognizers can become extremely slow on multi-megabyte
+            # bodies when given the entire payload at once. Chunk deterministic
+            # scans as well; overlap preserves matches crossing a boundary.
+            chunks = (
+                self._text_chunks(value)
+                if self.full_ner or len(value) > self.max_text_length
+                else [(0, value)]
+            )
             for offset, chunk in chunks:
                 results = analyser.analyze(
                     text=chunk,
