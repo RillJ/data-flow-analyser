@@ -123,6 +123,8 @@ class PersonalDataFlowEvidence(BaseModel):
     detection_method: Literal["seed_match", "presidio"] = "seed_match"
     count: int = Field(ge=1)
     flow_ids: List[str] = Field(default_factory=list)
+    cookies_sent: Dict[str, str] = Field(default_factory=dict)
+    cookies_by_flow: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +295,10 @@ class StorageClassificationResult(BaseModel):
     classification: StorageClassificationType
     reasoning: str
     declared_match: Optional[DeclaredStorageItem] = None
+    declared_provider: Optional[str] = None
+    declared_purpose: Optional[str] = None
+    declared_lifespan: Optional[str] = None
+    policy_quote: Optional[str] = None
 
 
 class DocumentAnalysisResult(BaseModel):

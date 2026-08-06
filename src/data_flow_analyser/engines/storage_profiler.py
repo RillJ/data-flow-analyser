@@ -93,6 +93,10 @@ class StorageProfiler:
                                 f"observed lifespan of {observed_days:.1f} days (exceeds 90-day threshold)."
                             ),
                             declared_match=matched_declared,
+                            declared_provider=matched_declared.provider,
+                            declared_purpose=matched_declared.purpose,
+                            declared_lifespan=matched_declared.stated_lifespan,
+                            policy_quote=matched_declared.citation_excerpt,
                         )
                     )
                     logger.debug("Storage decision: name=%s classification=%s observed_days=%s declared=%s", cookie_name, StorageClassificationType.EXCESSIVE_LIFESPAN.value, observed_days, matched_declared.name)
@@ -107,6 +111,10 @@ class StorageProfiler:
                             classification=StorageClassificationType.DOCUMENTED,
                             reasoning=f"Cookie '{cookie_name}' matches declared storage item '{matched_declared.name}'.",
                             declared_match=matched_declared,
+                            declared_provider=matched_declared.provider,
+                            declared_purpose=matched_declared.purpose,
+                            declared_lifespan=matched_declared.stated_lifespan,
+                            policy_quote=matched_declared.citation_excerpt,
                         )
                     )
                     logger.debug("Storage decision: name=%s classification=%s observed_days=%s declared=%s", cookie_name, StorageClassificationType.DOCUMENTED.value, observed_days, matched_declared.name)

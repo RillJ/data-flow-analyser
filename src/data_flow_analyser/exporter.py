@@ -114,14 +114,16 @@ class ReportExporter:
         if not report.storage_classifications:
             md.append("_No storage mechanisms or cookies recorded/analysed._\n")
         else:
-            md.append("| Name | Observed Domain(s) | Cookie Domain Attribute(s) | Type | Observed Duration (Days) | Classification | Reasoning |")
-            md.append("| --- | --- | --- | --- | --- | --- | --- |")
+            md.append("| Name | Observed Domain(s) | Cookie Domain Attribute(s) | Type | Observed Duration (Days) | Declared Purpose | Policy Quote | Classification | Reasoning |")
+            md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
             for st in report.storage_classifications:
                 days_str = f"{st.observed_lifespan_days:.1f}" if st.observed_lifespan_days is not None else "Session/Unknown"
                 md.append(
                     f"| `{st.name}` | {', '.join(f'`{domain}`' for domain in st.domains) or 'Unknown'} | "
                     f"{', '.join(f'`{domain}`' for domain in st.cookie_domain_attributes) or 'Not specified'} | "
-                    f"{st.storage_type.value} | {days_str} | **{st.classification.value}** | {st.reasoning} |"
+                    f"{st.storage_type.value} | {days_str} | {st.declared_purpose or 'Not specified'} | "
+                    f"_{(st.policy_quote or 'Not available').replace(chr(10), ' ')}_ | "
+                    f"**{st.classification.value}** | {st.reasoning} |"
                 )
             md.append("\n")
 
@@ -157,14 +159,15 @@ class ReportExporter:
         if not report.personal_data_flows:
             md.append("_No personal-data flow evidence detected._\n")
         else:
-            md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value |")
-            md.append("| ---: | --- | --- | --- | --- | --- | --- |")
+            md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value | Cookies sent with matched request |")
+            md.append("| ---: | --- | --- | --- | --- | --- | --- | --- |")
             for evidence in report.personal_data_flows:
                 md.append(
                     f"| {evidence.count} | {evidence.detection_method} | "
                     f"{evidence.direction} | `{evidence.endpoint}` | "
                     f"{evidence.data_label} | `{evidence.location}` | "
-                    f"`{evidence.sample_value}` |"
+                    f"`{evidence.sample_value}` | "
+                    f"{', '.join(f'`{name}`' for name in evidence.cookies_sent) or 'None'} |"
                 )
             md.append("\n")
 

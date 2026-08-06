@@ -194,6 +194,7 @@ class AuditPipeline:
         # Seed-independent personal-data candidate detection on decoded values.
         report_progress(PIPELINE_STAGES[3])
         presidio_matches = self.presidio_detector.detect_flows(flows)
+        self._attach_cookie_context(presidio_matches, flows)
         personal_data_flows = self._group_personal_data_flows(seed_matches + presidio_matches)
         if presidio_matches:
             logger.info("Detected %d additional Presidio personal data candidates.", len(presidio_matches))
@@ -508,10 +509,20 @@ class AuditPipeline:
                             "field_type": label,
                             "location": f"flow[{flow.flow_id}].{direction}.{location_name}",
                             "host": flow.host,
+                            "cookies_sent": dict(flow.cookies_sent),
                         }
                     )
 
         return matches
+
+    @staticmethod
+    def _attach_cookie_context(
+        matches: List[Dict[str, Any]], flows: List[NetworkFlow]
+    ) -> None:
+        """Attach request cookies for each Presidio match's source flow."""
+        cookies_by_flow = {flow.flow_id: dict(flow.cookies_sent) for flow in flows}
+        for match in matches:
+            match["cookies_sent"] = cookies_by_flow.get(match.get("flow_id", ""), {})
 
     @staticmethod
     def _group_personal_data_flows(
@@ -542,12 +553,19 @@ class AuditPipeline:
                     "detection_method": match.get("detection_method", "seed_match"),
                     "count": 0,
                     "flow_ids": [],
+                    "cookies_sent": {},
+                    "cookies_by_flow": {},
                 }
             grouped[key]["count"] += 1
             if match["matched_value"] not in grouped[key]["matched_values"]:
                 grouped[key]["matched_values"].append(match["matched_value"])
             if match["flow_id"] not in grouped[key]["flow_ids"]:
                 grouped[key]["flow_ids"].append(match["flow_id"])
+            flow_id = match["flow_id"]
+            flow_cookies = dict(match.get("cookies_sent") or {})
+            grouped[key]["cookies_by_flow"][flow_id] = flow_cookies
+            for cookie_name, cookie_value in flow_cookies.items():
+                grouped[key]["cookies_sent"].setdefault(cookie_name, cookie_value)
 
         return sorted(
             (PersonalDataFlowEvidence(**item) for item in grouped.values()),

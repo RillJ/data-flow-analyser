@@ -78,6 +78,8 @@ You must produce an auditable report evaluating:
    - "undocumented": Cookie/storage item observed in traffic but absent from declarations.
    - "excessive_lifespan": Cookie duration exceeds stated lifespan or 90-day recommended window.
    - "purpose_mismatch": Observed usage conflicts with declared storage purpose.
+   Use each storage evaluation's declared provider, purpose, lifespan, and
+   policy quote when comparing cookie activity with the vendor's explanation.
 
 3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. Look for:
    - Undocumented endpoints receiving data.
@@ -100,6 +102,11 @@ The personal data flow mapping contains two evidence types:
   This is candidate evidence; use its label, location, endpoint, direction, and
   count. Presidio scores are intentionally not included because the configured
   recognizers do not provide calibrated probabilities.
+Each personal-data mapping record also includes `cookies_sent`, the cookie
+names and captured values observed on the request. Use this grouped context
+when deciding whether the cookie activity is consistent with the payload and
+the declared cookie purpose; an empty map means no request cookies were
+captured for the mapped evidence.
 
 The capture is a mitmproxy interception, so readable request/response content
 has already been decrypted for inspection. Do not call that content
@@ -413,6 +420,7 @@ class LLMCrossReferencer:
                 "sample_value": evidence.sample_value,
                 "count": evidence.count,
                 "detection_method": evidence.detection_method,
+                "cookies_sent": evidence.cookies_sent,
             }
             for evidence in personal_data_flows
         ]
@@ -468,6 +476,10 @@ class LLMCrossReferencer:
                 "observed_lifespan_days": item.observed_lifespan_days,
                 "classification": item.classification.value,
                 "reasoning": item.reasoning,
+                "declared_provider": item.declared_provider,
+                "declared_purpose": item.declared_purpose,
+                "declared_lifespan": item.declared_lifespan,
+                "policy_quote": item.policy_quote,
             }
             for item in storage_evaluations
         ]

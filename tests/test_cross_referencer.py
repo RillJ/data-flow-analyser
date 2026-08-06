@@ -20,6 +20,7 @@ from data_flow_analyser.models.schemas import (
     StorageClassificationResult,
     StorageClassificationType,
     StorageTechnologyType,
+    PersonalDataFlowEvidence,
 )
 
 
@@ -129,6 +130,35 @@ def test_parse_audit_report_json():
     assert disc.risk_assessment.indicative_level == IndicativeRiskLevel.HIGH
     assert disc.risk_assessment.risk_score == 9
     assert "user@example.com" in disc.observed_evidence
+
+
+def test_llm_evidence_uses_grouped_cookies_without_per_flow_expansion():
+    referencer = LLMCrossReferencer()
+    evidence = PersonalDataFlowEvidence(
+        endpoint="api.example.com",
+        direction="request",
+        location="request.body",
+        data_label="email",
+        sample_value="user@example.com",
+        count=2,
+        cookies_sent={"sid": "abc"},
+        cookies_by_flow={"flow-1": {"sid": "abc"}, "flow-2": {"sid": "def"}},
+    )
+
+    summary = referencer._prepare_evidence_summary(
+        flows=[],
+        endpoints=[],
+        personal_data_flows=[evidence],
+        entropy_tokens=[],
+        cookie_results=[],
+        storage_evaluations=[],
+        fingerprint_vectors=[],
+        fingerprint_persistence_findings=[],
+    )
+
+    mapping = summary["personal_data_flow_mapping"][0]
+    assert mapping["cookies_sent"] == {"sid": "abc"}
+    assert "cookies_by_flow" not in mapping
 
 
 def test_parse_audit_report_storage_fallback():
