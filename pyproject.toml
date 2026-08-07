@@ -12,13 +12,15 @@ dependencies = [
     "pydantic>=2.0",
     "typer",
     "rich",
-    "pytest",
     "mitmproxy",
-    "dotenv",
+    "python-dotenv",
     "litellm",
     "presidio-analyzer>=2.2.359",
     "spacy>=3.7",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest"]
 
 [project.scripts]
 data-flow-analyser = "data_flow_analyser.cli:main"

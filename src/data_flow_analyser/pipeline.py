@@ -279,6 +279,9 @@ class AuditPipeline:
                 for identifier in (endpoint.domain, endpoint.ip_address)
                 if identifier
             ],
+            consent_decided_at=consent_decided_at,
+            consent_withdrawn_at=consent_withdrawn_at,
+            consent_outcome=consent_outcome,
         )
         # Preserve deterministic evidence in the report independently of LLM success.
         report.fingerprint_vectors = fingerprint_vectors

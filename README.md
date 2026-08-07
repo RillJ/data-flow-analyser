@@ -66,6 +66,7 @@ The storage profiler inventories observed cookie names from sent and set cookies
 - Observed lifespan and matching policy declarations.
 - The network hosts where each cookie was observed being set or sent.
 - The optional `Domain=` attribute declared in `Set-Cookie` headers.
+- The exact timestamp and first consent phase in which each cookie was observed, when consent timestamps are supplied.
 
 Cookies with a parsed lifetime longer than 90 days are flagged by the deterministic analyser. This is an analytical threshold, not a legal conclusion.
 
@@ -97,17 +98,17 @@ This analyser does not estimate how rare a fingerprint is in the wider browser p
 
 ### Consent-phase analysis
 
-Consent metadata is optional because not every capture contains pre-decision, post-decision, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps. The default outcome is `necessary_only` with `non_essential_granted` as an alternative option:
+Consent metadata is optional because not every capture contains pre-decision, post-decision, and withdrawn phases. When timestamps are supplied, flows are assigned to phases using their capture timestamps. `--consent-decided-at` records when the cookie-banner choice was made; it does not mean that all cookies were accepted. The default outcome is `necessary_only`, meaning that only strictly necessary or functional cookies were accepted. `non_essential_granted` represents a full-consent test in which optional categories were also accepted:
 
 - `pre_consent`
-- `post_decision_denied`
-- `consented`
+- `post_decision_necessary_only`
+- `full_consent`
 - `withdrawn`
 - `unknown`
 
-If timestamps are omitted, the tool does not assume that consent was denied. All flows remain `unknown` for consent-phase analysis.
+If timestamps are omitted, the tool does not assume that a consent choice was made. All flows remain `unknown` for consent-phase analysis.
 
-Identical fingerprint candidates observed before the decision, after non-essential consent was denied, or across consented and withdrawn phases are reported as consent-phase findings. Missing phase data is reported as unknown; it is not treated as proof of compliance or non-compliance.
+Identical fingerprint candidates observed before the decision, after the necessary-only choice, or across full-consent and withdrawn phases are reported as consent-phase findings. Missing phase data is reported as unknown; it is not treated as proof of compliance or non-compliance.
 
 ### Policy analysis and LLM cross-referencing
 
@@ -284,14 +285,24 @@ data-flow-analyser audit \
 
 ### Analyse consent phases
 
-Provide consent-event timestamps when the capture contains those phases. Timestamps must be ISO-8601 and include a timezone:
+Provide the timestamp of the cookie-banner choice when the capture contains a consent decision. Timestamps must be ISO-8601 and include a timezone. For the standard privacy test, use `necessary_only` and omit the withdrawal timestamp:
 
 ```bash
 data-flow-analyser audit \
   --capture scenarios.flows \
   --doc dpa.txt \
   --consent-decided-at "2026-06-28T10:15:00+02:00" \
-  --consent-outcome necessary_only \
+  --consent-outcome necessary_only
+```
+
+For a separate full-consent and withdrawal scenario, use:
+
+```bash
+data-flow-analyser audit \
+  --capture scenarios.flows \
+  --doc dpa.txt \
+  --consent-decided-at "2026-06-28T10:15:00+02:00" \
+  --consent-outcome non_essential_granted \
   --consent-withdrawn-at "2026-06-28T10:40:00+02:00"
 ```
 

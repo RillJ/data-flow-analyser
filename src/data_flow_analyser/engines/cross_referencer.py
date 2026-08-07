@@ -21,6 +21,7 @@ from data_flow_analyser.engines.storage_profiler import StorageProfiler
 from data_flow_analyser.models.schemas import (
     ComplianceDiscrepancy,
     CookieLongevityResult,
+    ConsentOutcome,
     DiscrepancyCategory,
     HarmLikelihood,
     ImpactSeverity,
@@ -81,54 +82,68 @@ You must produce an auditable report evaluating:
    Use each storage evaluation's declared provider, purpose, lifespan, and
    policy quote when comparing cookie activity with the vendor's explanation.
 
-3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. Look for:
-   - Undocumented endpoints receiving data.
-   - Data collection exceeding stated categories (like: ACCOUNT_DATA sent to DIAGNOSTIC_DATA endpoints).
-   - Cookies or LocalStorage keys observed but unannounced, or with actual lifespans exceeding declared durations.
+3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. A few examples of discrepancies include:
+   - Undocumented endpoints receiving data, detailing what data was sent and where.
+   - Data collection exceeding stated purposes.
+   - Cookies or LocalStorage keys observed but undocumented, or with actual lifespans exceeding declared durations.
    - International data transfers to third countries (like: US) without disclosed transfer safeguards.
-   - Candidate browser/device fingerprint vectors, especially those observed before consent or after withdrawal.
+   - Candidate browser/device fingerprint vectors, especially those observed before the banner choice, after the necessary-only choice, or after withdrawal.
 
-Fingerprint vectors are technical candidates based on attribute co-occurrence,
-not proof of unique identification. Only treat a consent-phase finding as evidence
-when the supplied phase is explicit; do not infer missing consent states.
+STORAGE AND COOKIE EVIDENCE
+`observed_storage_evaluations` is deterministic rule-based evidence. Treat its
+cookie names, observed domains, cookie Domain attributes, lifetimes, and
+classifications as authoritative; do not replace those classifications with a
+different LLM judgment. The `first_observed_phase` and `first_observed_at`
+fields identify the first phase and timestamp in which each cookie was seen,
+whether in a response `Set-Cookie` header or a request cookie.
 
-PERSONAL DATA FLOW EVIDENCE
-The personal data flow mapping contains two evidence types:
-- `seed_match`: a supplied controlled test value was observed, either directly or
-  through a recognised encoded/hashed form. This is strong evidence that the
-  supplied test value occurred in the captured flow, but it is not a claim that
-  every similar value is personal data.
-- `presidio`: Presidio identified a candidate entity in a decoded scalar value.
-  This is candidate evidence; use its label, location, endpoint, direction, and
-  count. Presidio scores are intentionally not included because the configured
-  recognizers do not provide calibrated probabilities.
-Each personal-data mapping record also includes `cookies_sent`, the cookie
-names and captured values observed on the request. Use this grouped context
-when deciding whether the cookie activity is consistent with the payload and
-the declared cookie purpose; an empty map means no request cookies were
-captured for the mapped evidence.
-
-The capture is a mitmproxy interception, so readable request/response content
-has already been decrypted for inspection. Do not call that content
-"plaintext transmitted on the wire" and do not create a plaintext-personal-data
-or encryption discrepancy merely because the analyser can read it. A finding
-may still discuss exposure risk when the evidence shows sensitive data in URLs,
-headers, or responses, or when it is sent to an undocumented or inappropriate
-recipient; describe the observed location and recipient precisely.
+Storage activity without the relevant consent: use
+"storage_before_consent" for any storage item first observed before the
+banner choice, "storage_after_necessary_only" for storage first observed
+after only necessary/functional cookies were accepted, and
+"storage_after_withdrawal" for storage first observed after withdrawal.
+For this research protocol, do not exempt a cookie merely because its
+declared purpose is strictly necessary or functional: no cookie may be
+placed or first observed before the banner choice.
 
 HIGH ENTROPY EVIDENCE
 The `high_entropy_tokens` section contains aggregated identifier-like signals,
 not raw token values and not proof of personal data, tracking, or fingerprinting.
 Use it only as supporting context when recurrence, location, and endpoint are
-relevant. Do not infer a person's identity or a data category from entropy
-alone.
+relevant.
 
-STORAGE EVIDENCE
-`observed_storage_evaluations` is deterministic rule-based evidence. Treat its
-cookie names, observed domains, cookie Domain attributes, lifetimes, and
-classifications as authoritative; do not replace those classifications with a
-different LLM judgment. A long lifetime alone is not proof of unlawful tracking.
+PERSONAL DATA FLOW EVIDENCE
+The personal data flow mapping contains two evidence types:
+- `seed_match`: a supplied value was observed, either directly or through
+  a recognised encoded/hashed form. This is evidence that the
+  supplied test value occurred in the captured flow.
+- `presidio`: An additional engine aiding in finding personal data in flows.
+  Presidio's NER or regex engine identified an entity in a
+  decoded scalar value which resembles personal data.
 
+Each personal data mapping record includes `cookies_sent`, the cookie names
+observed on the requests. Use the grouped cookie-name context when deciding
+whether cookie activity is consistent with the payload and declared cookie purpose;
+an empty list means no request cookies were captured for the mapped evidence.
+
+The capture is a mitmproxy interception, so readable request/response content
+has already been decrypted for inspection. Do not call that content
+"plaintext transmitted on the wire" merely because the analyser can read it.
+A finding may still discuss exposure risk when the evidence shows sensitive data
+in URLs, headers, or responses, or when it is sent to an undocumented or
+inappropriate recipient; describe the observed location and recipient precisely.
+
+FINGERPRINTING EVIDENCE
+Fingerprint vectors are technical candidates based on attribute co-occurrence,
+not proof of unique identification. Only treat a consent-phase finding as evidence
+when the supplied phase is explicit; do not infer missing consent states. Use
+"fingerprinting_before_consent" for candidates observed before the banner
+choice, "fingerprinting_after_necessary_only" for candidates observed after
+only necessary/functional cookies were accepted, "fingerprinting_after_full_consent"
+for candidates observed after full consent, and
+"fingerprinting_after_withdrawal" for candidates observed after withdrawal.
+
+GENERAL
 Evidence references must point only to supplied identifiers. Valid forms are a
 captured flow ID, an observed endpoint/domain, or a prefixed identifier such as
 `personal_data_flow_mapping.<endpoint>`,
@@ -187,7 +202,7 @@ Respond strictly in JSON matching this schema:
     {
       "discrepancy_id": "DISC-001",
       "title": "Short descriptive title",
-      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|unsafe_third_country_transfer|fingerprinting_candidate|fingerprinting_after_withdrawal",
+      "category": "undocumented_endpoint|unannounced_data_collection|purpose_mismatch|storage_lifespan_excessive|unannounced_storage|storage_before_consent|storage_after_necessary_only|storage_after_withdrawal|unsafe_third_country_transfer|fingerprinting_candidate|fingerprinting_before_consent|fingerprinting_after_necessary_only|fingerprinting_after_full_consent|fingerprinting_after_withdrawal",
       "likelihood": "remote|reasonable_possibility|more_likely_than_not",
       "severity_impact": "minimal_impact|some_impact|serious_harm",
       "potential_harms": ["loss_of_control"],
@@ -239,6 +254,9 @@ class LLMCrossReferencer:
         observed_domains: Optional[List[str]] = None,
         observed_flow_ids: Optional[List[str]] = None,
         observed_endpoint_identifiers: Optional[List[str]] = None,
+        consent_decided_at=None,
+        consent_withdrawn_at=None,
+        consent_outcome: ConsentOutcome = ConsentOutcome.NECESSARY_ONLY,
     ) -> FullAuditReport:
         """
         Executes an LLM-based technical cross-reference between observed evidence and policy claims.
@@ -256,6 +274,9 @@ class LLMCrossReferencer:
             flows=flows,
             cookie_results=cookie_results,
             declared_storage=doc_analysis.declared_storage_items,
+            consent_decided_at=consent_decided_at,
+            consent_withdrawn_at=consent_withdrawn_at,
+            consent_outcome=consent_outcome,
         )
 
         evidence_summary = self._prepare_evidence_summary(
@@ -270,7 +291,7 @@ class LLMCrossReferencer:
         )
         logger.debug("Evidence summary prepared: endpoints=%d personal_data_groups=%d entropy_tokens=%d storage_items=%d fingerprint_vectors=%d phase_findings=%d", len(evidence_summary["observed_endpoints"]), len(evidence_summary["personal_data_flow_mapping"]), len(evidence_summary["high_entropy_tokens"]), len(evidence_summary["observed_storage_evaluations"]), len(evidence_summary["fingerprint_vectors"]), len(evidence_summary["fingerprint_consent_phase_findings"]))
 
-        document_context = doc_analysis.model_dump(mode="json")
+        document_context = self._compact_document_context(doc_analysis)
 
         prompt_content = f"""
         === DECLARED POLICY DOCUMENTATION ===
@@ -294,6 +315,7 @@ class LLMCrossReferencer:
         Observed Evidence Summary:
         {json.dumps(evidence_summary, indent=2)}
         """
+        logger.info("Prepared cross-reference prompt: characters=%d", len(prompt_content))
 
         try:
             logger.debug(
@@ -396,7 +418,7 @@ class LLMCrossReferencer:
         fingerprint_vectors: List[FingerprintVector],
         fingerprint_persistence_findings: List[FingerprintPersistenceFinding],
     ) -> Dict[str, Any]:
-        """Summarises low-level network vectors into a clean structure for the prompt."""
+        """Builds a compact report-level projection for the LLM prompt."""
         endpoint_summary = [
             {
                 "domain": ep.domain,
@@ -417,10 +439,10 @@ class LLMCrossReferencer:
                 "direction": evidence.direction,
                 "location": evidence.location,
                 "data_label": evidence.data_label,
-                "sample_value": evidence.sample_value,
+                "sample_value": self._clip(evidence.sample_value, 256),
                 "count": evidence.count,
                 "detection_method": evidence.detection_method,
-                "cookies_sent": evidence.cookies_sent,
+                "cookies_sent": sorted(evidence.cookies_sent),
             }
             for evidence in personal_data_flows
         ]
@@ -440,7 +462,6 @@ class LLMCrossReferencer:
                     "distinct_token_count": 0,
                     "total_occurrences": 0,
                     "reused_token_count": 0,
-                    "flow_ids": set(),
                     "min_entropy": token.entropy,
                     "max_entropy": token.entropy,
                 },
@@ -448,7 +469,6 @@ class LLMCrossReferencer:
             group["distinct_token_count"] += 1
             group["total_occurrences"] += token.occurrences
             group["reused_token_count"] += int(token.occurrences > 1)
-            group["flow_ids"].update(token.flow_ids)
             group["min_entropy"] = min(group["min_entropy"], token.entropy)
             group["max_entropy"] = max(group["max_entropy"], token.entropy)
 
@@ -459,7 +479,6 @@ class LLMCrossReferencer:
                 "distinct_token_count": group["distinct_token_count"],
                 "total_occurrences": group["total_occurrences"],
                 "reused_token_count": group["reused_token_count"],
-                "flow_count": len(group["flow_ids"]),
                 "min_entropy": round(group["min_entropy"], 4),
                 "max_entropy": round(group["max_entropy"], 4),
                 "interpretation": "candidate identifier signal; not proof of personal data",
@@ -475,11 +494,12 @@ class LLMCrossReferencer:
                 "type": item.storage_type.value,
                 "observed_lifespan_days": item.observed_lifespan_days,
                 "classification": item.classification.value,
-                "reasoning": item.reasoning,
+                "reasoning": self._clip(item.reasoning, 400),
                 "declared_provider": item.declared_provider,
                 "declared_purpose": item.declared_purpose,
                 "declared_lifespan": item.declared_lifespan,
-                "policy_quote": item.policy_quote,
+                "first_observed_phase": item.first_observed_phase.value,
+                "first_observed_at": item.first_observed_at.isoformat() if item.first_observed_at else None,
             }
             for item in storage_evaluations
         ]
@@ -490,17 +510,29 @@ class LLMCrossReferencer:
                 "endpoint": vector.endpoint,
                 "consent_phase": vector.consent_phase.value,
                 "matched_categories": vector.matched_categories,
-                "attributes": [attribute.model_dump() for attribute in vector.attributes],
                 "payload_locations": vector.payload_locations,
                 "attribute_count": vector.attribute_count,
                 "heuristic_score": vector.heuristic_score,
-                "is_candidate": vector.is_candidate,
-                "scoring_method": vector.scoring_method,
             }
             for vector in fingerprint_vectors
             if vector.is_candidate
         ]
-        persistence_summary = [finding.model_dump(mode="json") for finding in fingerprint_persistence_findings]
+        persistence_summary = [
+            {
+                "endpoint": finding.endpoint,
+                "observed_phases": [phase.value for phase in finding.observed_phases],
+                "flow_ids": finding.flow_ids,
+                "observed_before_consent": finding.observed_before_consent,
+                "observed_after_full_consent": finding.observed_after_full_consent,
+                "persists_after_full_consent": finding.persists_after_full_consent,
+                "observed_after_necessary_only": finding.observed_after_necessary_only,
+                "persists_after_necessary_only": finding.persists_after_necessary_only,
+                "observed_after_withdrawal": finding.observed_after_withdrawal,
+                "persists_after_withdrawal": finding.persists_after_withdrawal,
+                "reasoning": self._clip(finding.reasoning, 400),
+            }
+            for finding in fingerprint_persistence_findings
+        ]
 
         return {
             "observed_endpoints": endpoint_summary,
@@ -509,6 +541,48 @@ class LLMCrossReferencer:
             "observed_storage_evaluations": storage_summary,
             "fingerprint_vectors": fingerprint_summary,
             "fingerprint_consent_phase_findings": persistence_summary,
+        }
+
+    @staticmethod
+    def _clip(value: Optional[str], limit: int) -> Optional[str]:
+        if value is None or len(value) <= limit:
+            return value
+        return value[:limit] + "…"
+
+    @classmethod
+    def _compact_document_context(cls, doc_analysis: DocumentAnalysisResult) -> Dict[str, Any]:
+        """Keep policy context useful for comparison without sending raw extracted text."""
+        return {
+            "declared_categories": [
+                {
+                    "category": item.category.value,
+                    "description": cls._clip(item.description, 500),
+                    "examples_given": item.examples_given[:10],
+                    "citation_excerpt": cls._clip(item.citation_excerpt, 600),
+                }
+                for item in doc_analysis.declared_categories
+            ],
+            "declared_subprocessors": [
+                {
+                    "name": item.name,
+                    "domain_or_host": item.domain_or_host,
+                    "purpose": cls._clip(item.purpose, 300),
+                    "country_or_location": item.country_or_location,
+                    "citation_excerpt": cls._clip(item.citation_excerpt, 600),
+                }
+                for item in doc_analysis.declared_subprocessors
+            ],
+            "declared_storage_items": [
+                {
+                    "name": item.name,
+                    "storage_type": item.storage_type.value,
+                    "provider": item.provider,
+                    "purpose": cls._clip(item.purpose, 300),
+                    "stated_lifespan": item.stated_lifespan,
+                    "citation_excerpt": cls._clip(item.citation_excerpt, 600),
+                }
+                for item in doc_analysis.declared_storage_items
+            ],
         }
 
     def _parse_audit_report(

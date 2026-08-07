@@ -157,7 +157,7 @@ def test_llm_evidence_uses_grouped_cookies_without_per_flow_expansion():
     )
 
     mapping = summary["personal_data_flow_mapping"][0]
-    assert mapping["cookies_sent"] == {"sid": "abc"}
+    assert mapping["cookies_sent"] == ["sid"]
     assert "cookies_by_flow" not in mapping
 
 

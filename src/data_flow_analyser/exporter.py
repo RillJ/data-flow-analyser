@@ -110,19 +110,19 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Storage Mechanisms & Cookie Classifications\n")
-        md.append("_Compares observed cookies and storage mechanisms with policy declarations. A long lifetime is a retention indicator; it is not alone proof that a cookie is a tracker or unlawful._\n")
+        md.append("_Compares observed cookies and storage mechanisms with policy declarations and records the first consent phase in which each cookie was observed. A long lifetime is a retention indicator; it is not alone proof that a cookie is a tracker or unlawful._\n")
         if not report.storage_classifications:
             md.append("_No storage mechanisms or cookies recorded/analysed._\n")
         else:
-            md.append("| Name | Observed Domain(s) | Cookie Domain Attribute(s) | Type | Observed Duration (Days) | Declared Purpose | Policy Quote | Classification | Reasoning |")
+            md.append("| Name | Observed Domain(s) | Type | Duration (Days) | Declared Purpose | First Consent Phase | First Observed At | Classification | Reasoning |")
             md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
             for st in report.storage_classifications:
                 days_str = f"{st.observed_lifespan_days:.1f}" if st.observed_lifespan_days is not None else "Session/Unknown"
                 md.append(
                     f"| `{st.name}` | {', '.join(f'`{domain}`' for domain in st.domains) or 'Unknown'} | "
-                    f"{', '.join(f'`{domain}`' for domain in st.cookie_domain_attributes) or 'Not specified'} | "
                     f"{st.storage_type.value} | {days_str} | {st.declared_purpose or 'Not specified'} | "
-                    f"_{(st.policy_quote or 'Not available').replace(chr(10), ' ')}_ | "
+                    f"{st.first_observed_phase.value} | "
+                    f"{st.first_observed_at.isoformat() if st.first_observed_at else 'Unknown'} | "
                     f"**{st.classification.value}** | {st.reasoning} |"
                 )
             md.append("\n")
@@ -159,7 +159,7 @@ class ReportExporter:
         if not report.personal_data_flows:
             md.append("_No personal-data flow evidence detected._\n")
         else:
-            md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value | Cookies sent with matched request |")
+            md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value | Cookies sent |")
             md.append("| ---: | --- | --- | --- | --- | --- | --- | --- |")
             for evidence in report.personal_data_flows:
                 md.append(
@@ -202,9 +202,9 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Fingerprinting Consent-Phase Findings\n")
-        md.append("_Findings identify candidate fingerprinting before a consent decision or after non-essential consent was denied. An `unknown` phase means timestamps were unavailable or inconclusive; it does not mean consent was denied._\n")
+        md.append("_Findings identify candidate fingerprinting before a consent decision or after giving consent. An `unknown` phase means timestamps were unavailable or inconclusive; it does not mean a consent choice was recorded._\n")
         if not report.fingerprint_persistence_findings:
-            md.append("_No candidate vectors were observed before a consent decision, after non-essential consent was denied, or after withdrawal._\n")
+            md.append("_No candidate vectors were observed before a consent decision, after giving consent, or after withdrawal._\n")
         else:
             for finding in report.fingerprint_persistence_findings:
                 md.append(f"- **`{finding.endpoint}`** — {finding.reasoning}")

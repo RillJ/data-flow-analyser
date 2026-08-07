@@ -62,43 +62,6 @@ class ObservedEndpoint(BaseModel):
     is_undocumented: bool = False
 
 
-class PolicyStatement(BaseModel):
-    """Structured extraction of claims from vendor DPAs / Cookie Policies."""
-
-    vendor_name: str
-    declared_domains: List[str] = Field(default_factory=list)
-    declared_subprocessors: List[str] = Field(default_factory=list)
-    declared_cookie_names: List[str] = Field(default_factory=list)
-    stated_purposes: List[str] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Derived traffic evidence and legacy scoring components
-# ---------------------------------------------------------------------------
-
-class RiskComponents(BaseModel):
-    """Individual normalised factors contributing to a network flow risk score."""
-
-    data_sensitivity_score: float = Field(ge=0.0, le=10.0, description="S(D_personal_data)")
-    subprocessor_status_score: float = Field(ge=0.0, le=10.0, description="P(E_sub)")
-    tracker_category_score: float = Field(ge=0.0, le=10.0, description="T(C_track)")
-
-
-class PrivacyDiscrepancy(BaseModel):
-    """A documented mismatch between observed behavior and privacy expectations."""
-
-    flow_id: str
-    discrepancy_type: str
-    severity: Literal["LOW", "MEDIUM", "HIGH"]
-    evidence: str
-    risk_score: float = Field(
-        ge=0.0,
-        le=10.0,
-        description="Calculated R_flow score.",
-    )
-    components: RiskComponents
-
-
 class TrackingToken(BaseModel):
     """Raw high-entropy identifier evidence retained for audit inspection."""
 
@@ -109,6 +72,23 @@ class TrackingToken(BaseModel):
     occurrences: int = 1
     endpoint: Optional[str] = None
     flow_ids: List[str] = Field(default_factory=list)
+
+
+class ConsentPhase(str, Enum):
+    """Consent state inferred from user-supplied capture metadata."""
+
+    UNKNOWN = "unknown"
+    PRE_CONSENT = "pre_consent"
+    POST_DECISION_NECESSARY_ONLY = "post_decision_necessary_only"
+    FULL_CONSENT = "full_consent"
+    WITHDRAWN = "withdrawn"
+
+
+class ConsentOutcome(str, Enum):
+    """Outcome of the consent-banner decision for non-essential processing."""
+
+    NECESSARY_ONLY = "necessary_only"
+    NON_ESSENTIAL_GRANTED = "non_essential_granted"
 
 
 class PersonalDataFlowEvidence(BaseModel):
@@ -130,23 +110,6 @@ class PersonalDataFlowEvidence(BaseModel):
 # ---------------------------------------------------------------------------
 # Browser and device fingerprinting models
 # ---------------------------------------------------------------------------
-
-class ConsentPhase(str, Enum):
-    """Consent state inferred from user-supplied capture metadata."""
-
-    UNKNOWN = "unknown"
-    PRE_CONSENT = "pre_consent"
-    POST_DECISION_DENIED = "post_decision_denied"
-    CONSENTED = "consented"
-    WITHDRAWN = "withdrawn"
-
-
-class ConsentOutcome(str, Enum):
-    """Outcome of the consent-banner decision for non-essential processing."""
-
-    NECESSARY_ONLY = "necessary_only"
-    NON_ESSENTIAL_GRANTED = "non_essential_granted"
-
 
 class FingerprintAttribute(BaseModel):
     """One request value mapped to a browser/device fingerprinting category."""
@@ -181,8 +144,10 @@ class FingerprintPersistenceFinding(BaseModel):
     observed_phases: List[ConsentPhase] = Field(default_factory=list)
     flow_ids: List[str] = Field(default_factory=list)
     observed_before_consent: bool = False
-    observed_after_denial: bool = False
-    persists_after_denial: bool = False
+    observed_after_full_consent: bool = False
+    persists_after_full_consent: bool = False
+    observed_after_necessary_only: bool = False
+    persists_after_necessary_only: bool = False
     observed_after_withdrawal: bool = False
     persists_after_withdrawal: bool = False
     reasoning: str
@@ -299,6 +264,9 @@ class StorageClassificationResult(BaseModel):
     declared_purpose: Optional[str] = None
     declared_lifespan: Optional[str] = None
     policy_quote: Optional[str] = None
+    first_observed_phase: ConsentPhase = ConsentPhase.UNKNOWN
+    first_observed_flow_id: Optional[str] = None
+    first_observed_at: Optional[datetime] = None
 
 
 class DocumentAnalysisResult(BaseModel):
@@ -346,9 +314,15 @@ class DiscrepancyCategory(str, Enum):
     PURPOSE_MISMATCH = "purpose_mismatch"
     STORAGE_LIFESPAN_EXCESSIVE = "storage_lifespan_excessive"
     UNANNOUNCED_STORAGE = "unannounced_storage"
+    STORAGE_BEFORE_CONSENT = "storage_before_consent"
+    STORAGE_AFTER_NECESSARY_ONLY = "storage_after_necessary_only"
+    STORAGE_AFTER_WITHDRAWAL = "storage_after_withdrawal"
     UNSAFE_THIRD_COUNTRY_TRANSFER = "unsafe_third_country_transfer"
     PLAINTEXT_PERSONAL_DATA_LEAK = "plaintext_personal_data_leak"
     FINGERPRINTING_CANDIDATE = "fingerprinting_candidate"
+    FINGERPRINTING_BEFORE_CONSENT = "fingerprinting_before_consent"
+    FINGERPRINTING_AFTER_NECESSARY_ONLY = "fingerprinting_after_necessary_only"
+    FINGERPRINTING_AFTER_FULL_CONSENT = "fingerprinting_after_full_consent"
     FINGERPRINTING_AFTER_WITHDRAWAL = "fingerprinting_after_withdrawal"
 
 

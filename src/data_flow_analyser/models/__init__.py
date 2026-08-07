@@ -15,9 +15,6 @@
 from .schemas import (
     NetworkFlow,
     ObservedEndpoint,
-    PolicyStatement,
-    PrivacyDiscrepancy,
-    RiskComponents,
     PersonalDataFlowEvidence,
     SeedData,
 )
@@ -25,9 +22,6 @@ from .schemas import (
 __all__ = [
     "NetworkFlow",
     "ObservedEndpoint",
-    "PolicyStatement",
-    "PrivacyDiscrepancy",
-    "RiskComponents",
     "SeedData",
     "PersonalDataFlowEvidence",
 ]

@@ -60,7 +60,7 @@ def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
     decided_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
     withdrawn_at = datetime(2026, 6, 27, 11, tzinfo=timezone.utc)
     flows = [
-        _flow("flow-consented", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
+        _flow("flow-full-consent", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
         _flow("flow-withdrawn", datetime(2026, 6, 27, 11, 30, tzinfo=timezone.utc)),
     ]
 
@@ -70,29 +70,31 @@ def test_fingerprint_profiler_reports_identical_vector_after_withdrawal():
     assert len(findings) == 1
     assert findings[0].observed_after_withdrawal is True
     assert findings[0].persists_after_withdrawal is True
+    assert findings[0].observed_after_full_consent is True
+    assert findings[0].persists_after_full_consent is False
     assert set(findings[0].observed_phases) == {
-        ConsentPhase.CONSENTED,
+        ConsentPhase.FULL_CONSENT,
         ConsentPhase.WITHDRAWN,
     }
 
 
-def test_fingerprint_profiler_reports_candidate_before_and_after_denied_decision():
+def test_fingerprint_profiler_reports_candidate_before_and_after_necessary_only_choice():
     profiler = FingerprintProfiler()
     decided_at = datetime(2026, 6, 27, 10, tzinfo=timezone.utc)
     flows = [
         _flow("flow-before", datetime(2026, 6, 27, 9, 30, tzinfo=timezone.utc)),
-        _flow("flow-after-denial", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
+        _flow("flow-after-necessary-only", datetime(2026, 6, 27, 10, 30, tzinfo=timezone.utc)),
     ]
 
     vectors, findings = profiler.analyse_flows(flows, decided_at)
 
     assert [vector.consent_phase for vector in vectors] == [
         ConsentPhase.PRE_CONSENT,
-        ConsentPhase.POST_DECISION_DENIED,
+        ConsentPhase.POST_DECISION_NECESSARY_ONLY,
     ]
     assert len(findings) == 1
-    assert findings[0].observed_after_denial is True
-    assert findings[0].persists_after_denial is True
+    assert findings[0].observed_after_necessary_only is True
+    assert findings[0].persists_after_necessary_only is True
 
 
 def test_consent_phase_is_unknown_without_user_supplied_events():
