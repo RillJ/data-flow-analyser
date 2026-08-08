@@ -41,9 +41,6 @@ Presidio results are candidates rather than proof. For performance, very large n
 
 If Presidio or its spaCy model is unavailable, the seed-based pipeline continues and records an analysis warning.
 
-#### Shannon entropy calculations
-The analyser also calculates Shannon character entropy for candidate strings. Values that are at least eight characters long and meet the default entropy threshold of `3.5` are reported as possible dynamic identifiers. Generic HTTP negotiation headers such as `Accept` and `Accept-Language` are excluded because their values can score highly without being identifiers. Entropy evidence is grouped by endpoint and payload location before it is sent to the LLM, using counts, reuse, flow count, and entropy ranges rather than raw token strings. Entropy is a heuristic supporting signal, meaning a high score does not prove that a value is personal data or a tracker.
-
 ### Endpoint profiling
 
 For each observed host, the tool can:
@@ -94,7 +91,7 @@ score = min((0.1 × number_of_categories) +
 
 The score is an evidence-strength indicator for this heuristic, not a probability that fingerprinting occurred and not a measure of browser uniqueness. For example, five observed categories with one high-signal category produce a score of `0.7` (`0.5 + 0.2`). A score of `1.0` means that the heuristic reached its reporting cap; it does not mean 100% certainty.
 
-This analyser does not estimate how rare a fingerprint is in the wider browser population. A population-frequency baseline would require an external dataset containing the prevalence of values such as screen sizes, WebGL renderers, languages, and device capabilities. That baseline could be used to calculate entropy or rarity, but it is not configured in the current version. The current score therefore measures the quantity and type of observed categories only. The analyser also does not generate synthetic browser variations or run browser automation.
+This analyser does not estimate how rare a fingerprint is in the wider browser population. A population-frequency baseline would require an external dataset containing the prevalence of values such as screen sizes, WebGL renderers, languages, and device capabilities. The current score therefore measures the quantity and type of observed categories only. The analyser also does not generate synthetic browser variations or run browser automation.
 
 ### Consent-phase analysis
 
@@ -120,7 +117,7 @@ The document ingestor sends the complete aggregated policy/DPA text by default t
 - International-transfer mechanisms.
 - Retention statements.
 
-The cross-referencer then receives structured policy claims together with observed endpoints, grouped personal data flow mappings, grouped identifier signals, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
+The cross-referencer then receives structured policy claims together with observed endpoints, grouped personal data flow mappings, cookie results, and fingerprint evidence. It produces endpoint classifications, storage classifications, and discrepancy cards with reasoning and policy citations where available.
 
 ### Indicative risk evaluation
 
@@ -156,7 +153,7 @@ The risk score is `likelihood × severity`. The indicative matrix is:
 
 These levels are indications for human review, not definitive legal conclusions. The Markdown and JSON reports include the inputs, score, indicative level, potential harms, assessment basis, and a human-verification flag.
 
-LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, grouped personal data mappings, grouped entropy signals, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
+LLM classifications are validated after parsing. Unknown classifications, omitted observed endpoints, invalid evidence references, deterministic storage overrides, and incomplete risk inputs are recorded as report warnings. Evidence references may identify flow IDs, observed endpoint domains or IPs, grouped personal data mappings, observed storage items, or fingerprint vectors. A report with such warnings has `analysis_status: partial`; an execution or parsing failure has `analysis_status: failed`.
 
 ### Reproducibility
 
@@ -232,7 +229,7 @@ The command displays the endpoint table in the terminal and writes both JSON and
 }
 ```
 
-Pass that file to `audit` with `--exclude-file`. Matching is case-insensitive and excludes the listed domain plus all of its subdomains. Excluded flows are removed immediately after parsing, before endpoint profiling, seed matching, cookie and identifier analysis, fingerprint analysis, or LLM cross-referencing. Without `--exclude-file`, no flows are excluded.
+Pass that file to `audit` with `--exclude-file`. Matching is case-insensitive and excludes the listed domain plus all of its subdomains. Excluded flows are removed immediately after parsing, before endpoint profiling, seed matching, cookie analysis, fingerprint analysis, or LLM cross-referencing. Without `--exclude-file`, no flows are excluded.
 
 ```bash
 data-flow-analyser audit \
@@ -353,7 +350,7 @@ flowchart TD
     subgraph DET["Deterministic analysis"]
         B --> T["<b>Apply optional domain exclusions</b>\nExact domain + subdomains"]
         T --> D["<b>Match supplied seeds</b>\nPlaintext + case variants · MD5 · SHA-1 · SHA-256 · Base64"]
-        T --> F["<b>Analyse identifiers</b>\nGrouped entropy and cookie lifetime evidence"]
+        T --> F["<b>Analyse storage</b>\nCookies · lifetime · consent-phase"]
         T --> G["<b>Detect fingerprint vectors</b>\nQuery · headers · decoded bodies"]
         T --> H["<b>Profile endpoints</b>\nDNS · GeoIP · ASN · DDG Tracker Radar"]
         D --> I["<b>Grouped personal data flow mapping</b>"]
@@ -420,7 +417,7 @@ src/data_flow_analyser/
 │   ├── cross_referencer.py         LLM evidence cross-reference and parsing
 │   ├── document_ingestor.py        LLM policy extraction
 │   ├── endpoint_profiler.py        DNS, GeoIP, ASN, and Tracker Radar metadata
-│   ├── entropy.py                  Grouped identifier and cookie-lifetime analysis
+│   ├── cookie_analysis.py          Cookie-lifetime analysis
 │   ├── fingerprint_profiler.py     Fingerprint vector and consent-phase analysis
 │   ├── presidio_detector.py        Seed-independent PII candidate detection
 │   ├── risk_evaluator.py           Deterministic likelihood/severity scoring

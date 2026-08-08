@@ -23,9 +23,7 @@ from data_flow_analyser.engines.cross_referencer import LLMCrossReferencer
 from data_flow_analyser.engines.document_ingestor import PolicyDocumentIngestor
 from data_flow_analyser.engines.endpoint_profiler import EndpointProfiler
 from data_flow_analyser.engines.fingerprint_profiler import FingerprintProfiler
-from data_flow_analyser.engines.entropy import (
-    analyse_flow_identifiers,
-)
+from data_flow_analyser.engines.cookie_analysis import analyse_cookie_longevity
 from data_flow_analyser.engines.seed_hasher import (
     generate_seed_hash_map,
     scan_for_seed_matches,
@@ -43,7 +41,6 @@ from data_flow_analyser.models.schemas import (
     ObservedEndpoint,
     SeedData,
     PersonalDataFlowEvidence,
-    TrackingToken,
 )
 from data_flow_analyser import __version__
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
@@ -73,7 +70,7 @@ PIPELINE_STAGES = (
 class AuditPipeline:
     """
     Unified orchestrator combining all engines and parsers.
-    Runs flow parsing, endpoint profiling, personal data seed matching, entropy token extraction,
+    Runs flow parsing, endpoint profiling, personal data seed matching,
     cookie lifespan checks, document ingestion, and LLM privacy cross-referencing.
     """
 
@@ -199,35 +196,23 @@ class AuditPipeline:
         if presidio_matches:
             logger.info("Detected %d additional Presidio personal data candidates.", len(presidio_matches))
 
-        # Entropy tokens & cookie longevity
+        # Cookie longevity
         report_progress(PIPELINE_STAGES[4])
-        entropy_tokens: List[TrackingToken] = []
         cookie_results: List[CookieLongevityResult] = []
 
         for flow in flows:
-            tokens, cookies = analyse_flow_identifiers(
-                flow,
+            cookies = analyse_cookie_longevity(
+                flow.response_headers,
+                flow_timestamp=flow.timestamp,
                 reference_time=analysis_started_at,
             )
-            tokens = [
-                token.model_copy(
-                    update={"endpoint": flow.host, "flow_ids": [flow.flow_id]}
-                )
-                for token in tokens
-            ]
-            entropy_tokens.extend(tokens)
             cookie_results.extend(cookies)
             logger.debug(
-                "Identifier analysis: flow_id=%s entropy_tokens=%d cookie_records=%d",
-                flow.flow_id, len(tokens), len(cookies),
+                "Cookie longevity analysis: flow_id=%s cookie_records=%d",
+                flow.flow_id, len(cookies),
             )
 
-        logger.info(
-            f"Extracted {len(entropy_tokens)} high-entropy tokens "
-            f"and {len(cookie_results)} set-cookie longevity records."
-        )
-        entropy_tokens = self._aggregate_tracking_tokens(entropy_tokens)
-        logger.info("Reduced entropy evidence to %d unique token/location findings.", len(entropy_tokens))
+        logger.info("Extracted %d set-cookie longevity records.", len(cookie_results))
 
         fingerprint_vectors: List[FingerprintVector]
         fingerprint_findings: List[FingerprintPersistenceFinding]
@@ -266,7 +251,6 @@ class AuditPipeline:
             flows=flows,
             endpoints=endpoints,
             personal_data_flows=personal_data_flows,
-            entropy_tokens=entropy_tokens,
             cookie_results=cookie_results,
             fingerprint_vectors=fingerprint_vectors,
             fingerprint_persistence_findings=fingerprint_findings,
@@ -288,7 +272,6 @@ class AuditPipeline:
         report.fingerprint_persistence_findings = fingerprint_findings
         report.fingerprint_summary = fingerprint_summary
         report.observed_endpoints = endpoints
-        report.tracking_tokens = entropy_tokens
         report.cookie_longevity_results = cookie_results
         report.personal_data_flows = personal_data_flows
         if doc_analysis.warnings:
@@ -381,23 +364,6 @@ class AuditPipeline:
                 (vector.heuristic_score for vector in vectors), default=0.0
             ),
         )
-
-    @staticmethod
-    def _aggregate_tracking_tokens(
-        tokens: List[TrackingToken],
-    ) -> List[TrackingToken]:
-        """Collapse repeated entropy findings while retaining occurrence counts."""
-        aggregated: Dict[tuple[str, str, Optional[str]], TrackingToken] = {}
-        for token in tokens:
-            key = (token.token, token.location, token.endpoint)
-            if key in aggregated:
-                aggregated[key].occurrences += token.occurrences
-                for flow_id in token.flow_ids:
-                    if flow_id not in aggregated[key].flow_ids:
-                        aggregated[key].flow_ids.append(flow_id)
-            else:
-                aggregated[key] = token.model_copy()
-        return list(aggregated.values())
 
     @staticmethod
     def _validate_consent_timeline(

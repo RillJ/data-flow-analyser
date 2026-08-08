@@ -149,7 +149,6 @@ def test_llm_evidence_uses_grouped_cookies_without_per_flow_expansion():
         flows=[],
         endpoints=[],
         personal_data_flows=[evidence],
-        entropy_tokens=[],
         cookie_results=[],
         storage_evaluations=[],
         fingerprint_vectors=[],

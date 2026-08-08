@@ -127,33 +127,6 @@ class ReportExporter:
                 )
             md.append("\n")
 
-        md.append("## Identifier Entropy Evidence\n")
-        md.append("_Entropy is only a candidate-identifier signal, not proof of personal data. The table is grouped by endpoint and payload location; raw token evidence remains available in JSON._\n")
-        total_entropy_occurrences = sum(token.occurrences for token in report.tracking_tokens)
-        md.append(f"**Unique high-entropy findings:** {len(report.tracking_tokens)}  ")
-        md.append(f"**Total occurrences:** {total_entropy_occurrences}  ")
-        md.append("\n")
-        if report.tracking_tokens:
-            groups = {}
-            for token in report.tracking_tokens:
-                key = (token.endpoint or "Unknown", token.location)
-                group = groups.setdefault(
-                    key,
-                    {"tokens": 0, "occurrences": 0, "reused": 0, "min": token.entropy, "max": token.entropy},
-                )
-                group["tokens"] += 1
-                group["occurrences"] += token.occurrences
-                group["reused"] += int(token.occurrences > 1)
-                group["min"] = min(group["min"], token.entropy)
-                group["max"] = max(group["max"], token.entropy)
-            md.append("| Endpoint | Location | Distinct Tokens | Total Occurrences | Reused Tokens | Entropy Range |")
-            md.append("| --- | --- | ---: | ---: | ---: | --- |")
-            for (endpoint, location), group in groups.items():
-                md.append(
-                    f"| `{endpoint}` | `{location}` | {group['tokens']} | {group['occurrences']} | "
-                    f"{group['reused']} | {group['min']:.4f}–{group['max']:.4f} |"
-                )
-            md.append("\n")
         md.append("## Personal Data Flow Mapping\n")
         md.append("_Grouped automated personal-data evidence mapped to endpoint, direction, payload location, and data label. `seed_match` is controlled-value evidence; `presidio` is a scored candidate and requires human verification. Counts show repeated observations; source flow IDs are retained in JSON for reproduction but omitted here._\n")
         if not report.personal_data_flows:

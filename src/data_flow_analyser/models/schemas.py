@@ -62,18 +62,6 @@ class ObservedEndpoint(BaseModel):
     is_undocumented: bool = False
 
 
-class TrackingToken(BaseModel):
-    """Raw high-entropy identifier evidence retained for audit inspection."""
-
-    token: str
-    location: str  # example: "cookies_sent.session_id", "request_body.meta.visitor_id"
-    entropy: float
-    is_high_entropy: bool = True
-    occurrences: int = 1
-    endpoint: Optional[str] = None
-    flow_ids: List[str] = Field(default_factory=list)
-
-
 class ConsentPhase(str, Enum):
     """Consent state inferred from user-supplied capture metadata."""
 
@@ -400,7 +388,6 @@ class FullAuditReport(BaseModel):
     fingerprint_persistence_findings: List[FingerprintPersistenceFinding] = Field(default_factory=list)
     fingerprint_summary: FingerprintAnalysisSummary = Field(default_factory=FingerprintAnalysisSummary)
     observed_endpoints: List[ObservedEndpoint] = Field(default_factory=list)
-    tracking_tokens: List[TrackingToken] = Field(default_factory=list)
     cookie_longevity_results: List[CookieLongevityResult] = Field(default_factory=list)
     personal_data_flows: List[PersonalDataFlowEvidence] = Field(default_factory=list)
     discrepancies: List[ComplianceDiscrepancy] = Field(default_factory=list)
