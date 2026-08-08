@@ -17,23 +17,23 @@ from datetime import datetime, timezone
 
 
 def test_cookie_longevity_parsing_max_age():
-    # 1-year cookie = 31,536,000 seconds (> 90 days)
+    # One-year cookie: report the observed duration without applying a threshold.
     header = "tracking_id=xyz123; Max-Age=31536000; Path=/; Secure; SameSite=Lax"
     results = parse_set_cookie_longevity(header)
 
     assert len(results) == 1
     assert results[0].cookie_name == "tracking_id"
     assert results[0].lifespan_days == 365.0
-    assert results[0].is_excessive_longevity is True
+    assert results[0].lifespan_days == 365.0
 
 
 def test_cookie_longevity_short_lived():
-    # 1-hour session cookie = 3600 seconds (< 90 days)
+    # One-hour session cookie: report the observed duration.
     header = "session=abc987; Max-Age=3600; Path=/"
     results = parse_set_cookie_longevity(header)
 
     assert len(results) == 1
-    assert results[0].is_excessive_longevity is False
+    assert results[0].lifespan_days == 0.04
 
 
 def test_cookie_expiry_requires_explicit_reference_time():

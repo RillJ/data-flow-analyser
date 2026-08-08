@@ -166,7 +166,6 @@ class CookieLongevityResult(BaseModel):
     max_age_seconds: Optional[int] = None
     expires_at: Optional[datetime] = None
     lifespan_days: Optional[float] = None
-    is_excessive_longevity: bool = False  # True if > 90 days.
 
 
 # ---------------------------------------------------------------------------

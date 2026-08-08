@@ -59,13 +59,10 @@ The storage profiler inventories observed cookie names from sent and set cookies
 
 - Documented cookies.
 - Undocumented cookies.
-- Cookies with excessive lifetimes.
 - Observed lifespan and matching policy declarations.
 - The network hosts where each cookie was observed being set or sent.
 - The optional `Domain=` attribute declared in `Set-Cookie` headers.
 - The exact timestamp and first consent phase in which each cookie was observed, when consent timestamps are supplied.
-
-Cookies with a parsed lifetime longer than 90 days are flagged by the deterministic analyser. This is an analytical threshold, not a legal conclusion.
 
 ### Browser and device fingerprinting candidates
 

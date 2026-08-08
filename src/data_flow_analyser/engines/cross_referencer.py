@@ -76,23 +76,23 @@ You must produce an auditable report evaluating:
 2. STORAGE MECHANISM CLASSIFICATION: Classify each observed cookie or storage mechanism into one of:
    - "documented": Explicitly disclosed in policy/cookie documentation with matching duration/purpose.
    - "undocumented": Cookie/storage item observed in traffic but absent from declarations.
-   - "excessive_lifespan": Cookie duration exceeds stated lifespan or 90-day recommended window.
+   - "excessive_lifespan": Cookie duration conflicts with the stated lifespan.
    - "purpose_mismatch": Observed usage conflicts with declared storage purpose.
-   Use each storage evaluation's declared provider, purpose, lifespan, and
-   policy quote when comparing cookie activity with the vendor's explanation.
+Use each storage evaluation's observed lifespan, declared provider, purpose,
+declared lifespan, and policy quote when interpreting cookie activity.
 
 3. COMPLIANCE DISCREPANCIES: Compare observed network facts against policy claims. A few examples of discrepancies include:
    - Undocumented endpoints receiving data, detailing what data was sent and where.
    - Data collection exceeding stated purposes.
-   - Cookies or LocalStorage keys observed but undocumented, or with actual lifespans exceeding declared durations.
+   - Cookies or LocalStorage keys observed but undocumented, or whose observed and declared lifespans differ.
    - International data transfers to third countries (like: US) without disclosed transfer safeguards.
    - Candidate browser/device fingerprint vectors, especially those observed before the banner choice, after the necessary-only choice, or after withdrawal.
 
 STORAGE AND COOKIE EVIDENCE
-`observed_storage_evaluations` is deterministic rule-based evidence. Treat its
-cookie names, observed domains, cookie Domain attributes, lifetimes, and
-classifications as authoritative; do not replace those classifications with a
-different LLM judgment. The `first_observed_phase` and `first_observed_at`
+`observed_storage_evaluations` contains deterministic observations. Treat its
+cookie names, observed domains, cookie Domain attributes, and lifetimes as
+factual evidence. Use your judgment when interpreting duration or purpose.
+The `first_observed_phase` and `first_observed_at`
 fields identify the first phase and timestamp in which each cookie was seen,
 whether in a response `Set-Cookie` header or a request cookie.
 
@@ -600,9 +600,9 @@ class LLMCrossReferencer:
                     )
                 )
 
-            # Deterministic storage evidence is authoritative. Preserve the
-            # complete observed set even if the LLM omits an item, and do not
-            # let a conflicting model classification overwrite the rule result.
+            # Preserve the complete observed set even if the LLM omits an item.
+            # Deterministic documented/undocumented results remain authoritative;
+            # duration and purpose interpretations may come from the LLM.
             if fallback_storage:
                 fallback_by_name = {item.name.lower(): item for item in fallback_storage}
                 reconciled: List[StorageClassificationResult] = []
@@ -611,11 +611,15 @@ class LLMCrossReferencer:
                     deterministic = fallback_by_name.get(item.name.lower())
                     if deterministic:
                         seen_names.add(item.name.lower())
-                        if item.classification != deterministic.classification:
+                        llm_interpretation = item.classification in {
+                            StorageClassificationType.EXCESSIVE_LIFESPAN,
+                            StorageClassificationType.PURPOSE_MISMATCH,
+                        }
+                        if not llm_interpretation and item.classification != deterministic.classification:
                             warnings.append(
                                 f"Deterministic storage classification replaced LLM classification for '{item.name}'."
                             )
-                        reconciled.append(deterministic)
+                        reconciled.append(item if llm_interpretation else deterministic)
                     else:
                         reconciled.append(item)
                 for item in fallback_storage:

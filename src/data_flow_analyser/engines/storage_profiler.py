@@ -106,13 +106,7 @@ class StorageProfiler:
                 "first_observed_at": first_observation[0] if first_observation else None,
             }
 
-            if matched_declared and long_info and long_info.is_excessive_longevity:
-                classification = StorageClassificationType.EXCESSIVE_LIFESPAN
-                reasoning = (
-                    f"Cookie '{cookie_name}' is declared in documentation but has an excessive "
-                    f"observed lifespan of {observed_days:.1f} days (exceeds 90-day threshold)."
-                )
-            elif matched_declared:
+            if matched_declared:
                 classification = StorageClassificationType.DOCUMENTED
                 reasoning = f"Cookie '{cookie_name}' matches declared storage item '{matched_declared.name}'."
             else:

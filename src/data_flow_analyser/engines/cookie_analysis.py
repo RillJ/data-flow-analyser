@@ -21,8 +21,6 @@ from data_flow_analyser.models.schemas import (
     CookieLongevityResult,
 )
 
-# Standard duration threshold: 90 days in seconds
-NINETY_DAYS_SECONDS = 90 * 24 * 60 * 60  # 7,776,000 seconds
 logger = logging.getLogger(__name__)
 
 def parse_set_cookie_longevity(
@@ -31,7 +29,7 @@ def parse_set_cookie_longevity(
     reference_time: Optional[datetime] = None,
 ) -> List[CookieLongevityResult]:
     """
-    Parses Set-Cookie directives to calculate cookie lifespan and flag long-lived cookies (> 90 days).
+    Parses Set-Cookie directives to report observed cookie lifespan.
     """
     results: List[CookieLongevityResult] = []
     if not set_cookie_header:
@@ -83,10 +81,7 @@ def parse_set_cookie_longevity(
                 except Exception:
                     pass
 
-    is_excessive = False
-    if max_age_seconds is not None and max_age_seconds > NINETY_DAYS_SECONDS:
-        is_excessive = True
-    logger.debug("Cookie longevity: name=%s lifespan_days=%s excessive=%s", cookie_name, lifespan_days, is_excessive)
+    logger.debug("Cookie lifespan: name=%s lifespan_days=%s", cookie_name, lifespan_days)
 
     results.append(
         CookieLongevityResult(
@@ -95,7 +90,6 @@ def parse_set_cookie_longevity(
             max_age_seconds=max_age_seconds,
             expires_at=expires_dt,
             lifespan_days=lifespan_days,
-            is_excessive_longevity=is_excessive,
         )
     )
 
