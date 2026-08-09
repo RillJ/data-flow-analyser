@@ -14,6 +14,7 @@ dependencies = [
     "rich",
     "mitmproxy",
     "python-dotenv",
+    "markdown-it-py>=3.0",
     "litellm",
     "presidio-analyzer>=2.2.359",
     "spacy>=3.7",

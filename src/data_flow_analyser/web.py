@@ -25,7 +25,6 @@ import html
 import json
 import logging
 import mimetypes
-import re
 import secrets
 import tempfile
 from datetime import datetime
@@ -39,6 +38,7 @@ from typing import Callable
 from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
+from markdown_it import MarkdownIt
 
 from data_flow_analyser.exporter import ReportExporter
 from data_flow_analyser.endpoint_inventory import (
@@ -132,6 +132,10 @@ _RUNS_LOCK = Lock()
 _JOBS: dict[str, dict[str, object]] = {}
 _JOBS_LOCK = Lock()
 
+# js-default keeps tables and strikethrough enabled while treating raw HTML as
+# text, which is the safe default for Markdown displayed in this local web UI.
+_MARKDOWN = MarkdownIt("js-default")
+
 
 def _parse_timestamp(value: str | None, label: str) -> datetime | None:
     if not value:
@@ -145,76 +149,9 @@ def _parse_timestamp(value: str | None, label: str) -> datetime | None:
     return parsed
 
 
-def _markdown_inline(value: str) -> str:
-    """Render the inline Markdown used by the report exporter."""
-    rendered = html.escape(value)
-    rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
-    rendered = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", rendered)
-    rendered = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", rendered)
-    rendered = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"<em>\1</em>", rendered)
-    return rendered
-
-
 def _markdown_to_html(markdown: str) -> str:
-    """Render report Markdown into safe, readable HTML without external assets."""
-    lines = markdown.splitlines()
-    output: list[str] = []
-    paragraph: list[str] = []
-    in_list = False
-    index = 0
-
-    def flush_paragraph() -> None:
-        if paragraph:
-            output.append(f"<p>{_markdown_inline(' '.join(paragraph))}</p>")
-            paragraph.clear()
-
-    def close_list() -> None:
-        nonlocal in_list
-        if in_list:
-            output.append("</ul>")
-            in_list = False
-
-    while index < len(lines):
-        line = lines[index]
-        if (
-            line.startswith("|")
-            and index + 1 < len(lines)
-            and re.match(r"^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$", lines[index + 1])
-        ):
-            flush_paragraph()
-            close_list()
-            header = [cell.strip() for cell in line.strip("|").split("|")]
-            output.append("<table><thead><tr>" + "".join(f"<th>{_markdown_inline(cell)}</th>" for cell in header) + "</tr></thead><tbody>")
-            index += 2
-            while index < len(lines) and lines[index].startswith("|"):
-                cells = [cell.strip() for cell in lines[index].strip("|").split("|")]
-                output.append("<tr>" + "".join(f"<td>{_markdown_inline(cell)}</td>" for cell in cells) + "</tr>")
-                index += 1
-            output.append("</tbody></table>")
-            continue
-        heading = re.match(r"^(#{1,6})\s+(.+)$", line)
-        if heading:
-            flush_paragraph()
-            close_list()
-            level = len(heading.group(1))
-            output.append(f"<h{level}>{_markdown_inline(heading.group(2))}</h{level}>")
-        elif re.match(r"^\s*-\s+", line):
-            flush_paragraph()
-            if not in_list:
-                output.append("<ul>")
-                in_list = True
-            bullet = re.sub(r"^\s*-\s+", "", line)
-            output.append(f"<li>{_markdown_inline(bullet)}</li>")
-        elif not line.strip():
-            flush_paragraph()
-            close_list()
-        else:
-            close_list()
-            paragraph.append(line.strip())
-        index += 1
-    flush_paragraph()
-    close_list()
-    return "\n".join(output)
+    """Render Markdown as safe HTML without accepting raw HTML markup."""
+    return _MARKDOWN.render(markdown)
 
 
 def _json_input(
