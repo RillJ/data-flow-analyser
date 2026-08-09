@@ -202,7 +202,19 @@ Check that the installation is available:
 data-flow-analyser healthcheck
 ```
 
-### Review endpoints before an audit
+### Use the local web interface
+
+For a simple way to run the audit, start the local browser interface:
+
+```bash
+data-flow-analyser web
+```
+
+Then open the printed `http://127.0.0.1:8765` address. You can first select a capture and click **Gather endpoint evidence** to run the deterministic equivalent of `data-flow-analyser endpoints`; the browser shows the inventory and provides JSON/Markdown downloads. For a full audit, select a capture and one or more disclosure documents, choose the consent outcome, and optionally enter the decision and withdrawal timestamps. The timestamp timezone defaults to the browser's local timezone but can be selected explicitly. Seed input and excluded domains each support either pasted JSON (the default) or a small JSON file upload. The form also exposes the CLI's model, temperature, API key/base, Presidio language/full-NER, verbose, seed JSON, and excluded-domain JSON settings. The API key is optional: when left blank, the web run uses the environment or `.env` credentials available to LiteLLM. Presidio has an explicit **Disabled** option; otherwise English is selected by default. The results page shows the generated Markdown and provides downloads for the Markdown report, JSON report, and diagnostic log. The interface runs locally and uploads are kept in a temporary run directory.
+
+### Use the command line interface
+
+#### Review endpoints before an audit
 
 Before an audit, use the deterministic endpoint inventory command to review every host in a capture. It does not call an LLM or enrich domains over the network:
 
@@ -235,7 +247,7 @@ data-flow-analyser audit \
   --exclude-file excluded-domains.json
 ```
 
-### Run an audit
+#### Run an audit
 
 Run an audit with one or more policy documents, for example:
 
@@ -248,7 +260,7 @@ data-flow-analyser audit \
   --out-md audit.md
 ```
 
-### Match controlled test values
+#### Match controlled test values
 
 Add controlled seed values from a JSON file:
 
@@ -266,7 +278,7 @@ data-flow-analyser audit \
   --seed-file seed.json
 ```
 
-### Control reproducibility
+#### Control reproducibility
 
 The LLM temperature can be set explicitly for a run:
 
@@ -277,7 +289,7 @@ data-flow-analyser audit \
   --temperature 0
 ```
 
-### Analyse consent phases
+#### Analyse consent phases
 
 Provide the timestamp of the cookie-banner choice when the capture contains a consent decision. Timestamps must be ISO-8601 and include a timezone. For the standard privacy test, use `necessary_only` and omit the withdrawal timestamp:
 
@@ -300,7 +312,7 @@ data-flow-analyser audit \
   --consent-withdrawn-at "2026-06-28T10:40:00+02:00"
 ```
 
-### Enable diagnostics
+#### Enable diagnostics
 
 Use verbose diagnostics to inspect every major processing stage and the exact LLM inputs:
 
@@ -312,7 +324,7 @@ data-flow-analyser audit \
   --log-file audit-debug.log
 ```
 
-### Use full Presidio NER
+#### Use full Presidio NER
 
 By default, Presidio uses fast deterministic recognisers for very large values to avoid running spaCy NER over entire response bodies. To use the full NER on those values as well, use `--presidio-full-ner`.
 
@@ -324,7 +336,7 @@ data-flow-analyser audit \
   --verbose
 ```
 
-### Understand the reports
+#### Understand the reports
 
 Every audit writes both a JSON report and a Markdown report, and prints the Markdown report to the terminal. Use `--out-json` and/or `--out-md` to choose explicit output paths. If omitted, both files are written to the current directory as `audit-YYYYMMDD-HHMMSS.json` and `audit-YYYYMMDD-HHMMSS.md`.
 
@@ -398,6 +410,7 @@ For reproducible research, retain the capture file, policy-document versions, se
 ```text
 src/data_flow_analyser/
 ├── cli.py                         Command-line interface and logging setup
+├── web.py                         Web interface for endpoint extraction and audit
 ├── endpoint_inventory.py          Domain exclusion and endpoint helpers
 ├── exporter.py                    JSON and Markdown report generation
 ├── pipeline.py                    End-to-end orchestration
@@ -411,10 +424,11 @@ src/data_flow_analyser/
 │   └── decoder.py                  Recursive payload decoding
 ├── engines/
 │   ├── __init__.py
+│   ├── consent.py                  Consent-phase classification for analysers
+│   ├── cookie_analysis.py          Cookie-lifetime analysis
 │   ├── cross_referencer.py         LLM evidence cross-reference and parsing
 │   ├── document_ingestor.py        LLM policy extraction
 │   ├── endpoint_profiler.py        DNS, GeoIP, ASN, and Tracker Radar metadata
-│   ├── cookie_analysis.py          Cookie-lifetime analysis
 │   ├── fingerprint_profiler.py     Fingerprint vector and consent-phase analysis
 │   ├── presidio_detector.py        Seed-independent PII candidate detection
 │   ├── risk_evaluator.py           Deterministic likelihood/severity scoring

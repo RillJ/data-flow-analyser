@@ -76,7 +76,7 @@ class AuditPipeline:
 
     def __init__(
         self,
-        llm_model: str = "gpt-5.4-mini",
+        llm_model: str = "gpt-5.6-luna",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         temperature: float = 0.0,
@@ -183,12 +183,12 @@ class AuditPipeline:
         personal_data_flows = self._group_personal_data_flows(seed_matches)
         if seed_matches:
             logger.info(
-                "Detected %d personal-data occurrences, grouped into %d evidence records.",
+                "Detected %d personal data occurrences, grouped into %d evidence records.",
                 len(seed_matches), len(personal_data_flows),
             )
         logger.debug("Seed matching complete: occurrences=%d groups=%d", len(seed_matches), len(personal_data_flows))
 
-        # Seed-independent personal-data candidate detection on decoded values.
+        # Seed-independent personal data candidate detection on decoded values.
         report_progress(PIPELINE_STAGES[3])
         presidio_matches = self.presidio_detector.detect_flows(flows)
         self._attach_cookie_context(presidio_matches, flows)
@@ -502,7 +502,7 @@ class AuditPipeline:
         for match in matches:
             endpoint = match.get("host") or match.get("endpoint")
             if not endpoint:
-                logger.debug("Skipping personal-data match without endpoint: %s", match)
+                logger.debug("Skipping personal data match without endpoint: %s", match)
                 continue
             key = (
                 endpoint,

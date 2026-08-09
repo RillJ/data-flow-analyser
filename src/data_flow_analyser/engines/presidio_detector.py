@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Optional seed-independent personal-data detection using Presidio by Data Privacy Stack."""
+"""Optional seed-independent personal data detection using Presidio by Data Privacy Stack."""
 
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -97,6 +97,10 @@ class PresidioPersonalDataDetector:
         # matched span and the cache is also used by the deterministic path.
         self._analysis_cache: Dict[str, List[Tuple[str, int, int]]] = {}
         self._limit_reached = False
+        if language in {"", "disabled", "none"}:
+            self.warning = "Presidio personal data detection disabled by configuration."
+            logger.info(self.warning)
+            return
         try:
             from presidio_analyzer import AnalyzerEngine
             from presidio_analyzer.nlp_engine import NlpEngineProvider, NoOpNlpEngine
@@ -169,7 +173,7 @@ class PresidioPersonalDataDetector:
             )
         except Exception as error:  # optional dependency/model failure
             self.warning = (
-                "Presidio personal-data detection is unavailable: "
+                "Presidio personal data detection is unavailable: "
                 f"{type(error).__name__}: {error}. Install presidio-analyzer and an NLP model."
             )
             logger.warning(self.warning)

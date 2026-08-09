@@ -28,9 +28,14 @@ from rich.table import Table
 from data_flow_analyser import __version__
 from data_flow_analyser.exporter import ReportExporter
 from data_flow_analyser.pipeline import AuditPipeline, PIPELINE_STAGES
-from data_flow_analyser.endpoint_inventory import inventory_flows, load_excluded_domains
+from data_flow_analyser.endpoint_inventory import (
+    endpoint_inventory_to_markdown,
+    inventory_flows,
+    load_excluded_domains,
+)
 from data_flow_analyser.parsers.mitm_parser import parse_flow_file
 from data_flow_analyser.models.schemas import ConsentOutcome
+from data_flow_analyser.web import serve
 
 app = typer.Typer(help="Data Flow Analyser command-line interface.")
 console = Console()
@@ -99,33 +104,13 @@ def healthcheck() -> None:
     console.print(Panel("Data Flow Analyser engine ready", style="green"))
 
 
-def endpoint_inventory_to_markdown(payload: dict) -> str:
-    """Render a deterministic endpoint inventory as Markdown."""
-    lines = [
-        "# Endpoint Inventory",
-        "",
-        f"**Capture:** `{payload['capture']}`  ",
-        f"**Flows:** {payload['flow_count']}  ",
-        f"**Endpoints:** {payload['endpoint_count']}",
-        "",
-        "| Domain | Flows | Methods | Paths | First Seen | Last Seen |",
-        "| --- | ---: | --- | --- | --- | --- |",
-    ]
-    if not payload["endpoints"]:
-        lines.append("| _None_ | 0 |  |  |  |  |")
-    else:
-        for item in payload["endpoints"]:
-            methods = ", ".join(
-                f"{name} ({count})" for name, count in item["methods"].items()
-            )
-            paths = ", ".join(
-                f"`{path}` ({count})" for path, count in item["paths"].items()
-            )
-            lines.append(
-                f"| `{item['domain']}` | {item['flow_count']} | {methods} | {paths} | "
-                f"{item['first_seen'] or 'Unknown'} | {item['last_seen'] or 'Unknown'} |"
-            )
-    return "\n".join(lines) + "\n"
+@app.command("web")
+def web(
+    host: str = typer.Option("127.0.0.1", "--host", help="Local interface address."),
+    port: int = typer.Option(8765, "--port", min=1, max=65535, help="Local interface port."),
+) -> None:
+    """Open the simple local browser interface for running audits."""
+    serve(host, port)
 
 
 @app.command("endpoints")
@@ -239,7 +224,7 @@ def audit(
         help="Path to write Markdown audit report.",
     ),
     model: str = typer.Option(
-        "gpt-5.4-mini",
+        "gpt-5.6-luna",
         "--model",
         help="LiteLLM model name to use for analysis.",
     ),

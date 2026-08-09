@@ -45,6 +45,35 @@ def host_is_excluded(host: str, excluded_domains: Iterable[str]) -> bool:
     return any(candidate == domain or candidate.endswith(f".{domain}") for domain in excluded_domains)
 
 
+def endpoint_inventory_to_markdown(payload: dict[str, Any]) -> str:
+    """Render a deterministic endpoint inventory as Markdown."""
+    lines = [
+        "# Endpoint Inventory",
+        "",
+        f"**Capture:** `{payload['capture']}`  ",
+        f"**Flows:** {payload['flow_count']}  ",
+        f"**Endpoints:** {payload['endpoint_count']}",
+        "",
+        "| Domain | Flows | Methods | Paths | First Seen | Last Seen |",
+        "| --- | ---: | --- | --- | --- | --- |",
+    ]
+    if not payload["endpoints"]:
+        lines.append("| _None_ | 0 |  |  |  |  |")
+    else:
+        for item in payload["endpoints"]:
+            methods = ", ".join(
+                f"{name} ({count})" for name, count in item["methods"].items()
+            )
+            paths = ", ".join(
+                f"`{path}` ({count})" for path, count in item["paths"].items()
+            )
+            lines.append(
+                f"| `{item['domain']}` | {item['flow_count']} | {methods} | {paths} | "
+                f"{item['first_seen'] or 'Unknown'} | {item['last_seen'] or 'Unknown'} |"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def inventory_flows(flows: Iterable[NetworkFlow]) -> list[dict[str, Any]]:
     """Aggregate flow counts and representative request details by host."""
     grouped: dict[str, dict[str, Any]] = defaultdict(

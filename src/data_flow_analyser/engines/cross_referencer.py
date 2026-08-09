@@ -101,9 +101,6 @@ Storage activity without the relevant consent: use
 banner choice, "storage_after_necessary_only" for storage first observed
 after only necessary/functional cookies were accepted, and
 "storage_after_withdrawal" for storage first observed after withdrawal.
-For this research protocol, do not exempt a cookie merely because its
-declared purpose is strictly necessary or functional: no cookie may be
-placed or first observed before the banner choice.
 
 PERSONAL DATA FLOW EVIDENCE
 The personal data flow mapping contains two evidence types:
@@ -221,7 +218,7 @@ class LLMCrossReferencer:
 
     def __init__(
         self,
-        model: str = "gpt-5.4-mini",
+        model: str = "gpt-5.6-luna",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         temperature: float = 1.0,

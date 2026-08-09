@@ -91,7 +91,7 @@ class PolicyDocumentIngestor:
 
     def __init__(
         self,
-        model: str = "gpt-5.4-mini",
+        model: str = "gpt-5.6-luna",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         temperature: float = 1.0,

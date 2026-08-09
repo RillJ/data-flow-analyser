@@ -80,7 +80,7 @@ class ConsentOutcome(str, Enum):
 
 
 class PersonalDataFlowEvidence(BaseModel):
-    """Grouped personal-data evidence with flow IDs retained for reproduction."""
+    """Grouped personal data evidence with flow IDs retained for reproduction."""
 
     endpoint: str
     direction: Literal["request", "response"]

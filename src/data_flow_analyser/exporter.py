@@ -128,9 +128,9 @@ class ReportExporter:
             md.append("\n")
 
         md.append("## Personal Data Flow Mapping\n")
-        md.append("_Grouped automated personal-data evidence mapped to endpoint, direction, payload location, and data label. `seed_match` is controlled-value evidence; `presidio` is a scored candidate and requires human verification. Counts show repeated observations; source flow IDs are retained in JSON for reproduction but omitted here._\n")
+        md.append("_Grouped automated personal data evidence mapped to endpoint, direction, payload location, and data label. `seed_match` is controlled-value evidence; `presidio` is a scored candidate and requires human verification. Counts show repeated observations; source flow IDs are retained in JSON for reproduction but omitted here._\n")
         if not report.personal_data_flows:
-            md.append("_No personal-data flow evidence detected._\n")
+            md.append("_No personal data flow evidence detected._\n")
         else:
             md.append("| Count | Method | Direction | Endpoint | Data label | Payload location | Sample value | Cookies sent |")
             md.append("| ---: | --- | --- | --- | --- | --- | --- | --- |")
