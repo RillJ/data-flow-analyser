@@ -176,14 +176,17 @@ def run_web_audit(
     progress_callback: Callable[[str], None] | None = None,
 ) -> tuple[str, Path]:
     """Run one uploaded audit and return its ID and temporary result directory."""
-    capture = uploads.get("capture", [])
+    captures = uploads.get("capture", [])
     documents = uploads.get("documents", [])
-    if not capture or not documents:
-        raise ValueError("Choose one capture and at least one disclosure document.")
+    if not captures or not documents:
+        raise ValueError("Choose at least one capture and one disclosure document.")
 
     run_dir = Path(tempfile.mkdtemp(prefix="data-flow-analyser-web-"))
-    capture_path = run_dir / Path(capture[0][0]).name
-    capture_path.write_bytes(capture[0][1])
+    capture_paths = []
+    for index, (name, content) in enumerate(captures, start=1):
+        capture_path = run_dir / f"capture-{index}-{Path(name).name}"
+        capture_path.write_bytes(content)
+        capture_paths.append(capture_path)
     document_paths = []
     for index, (name, content) in enumerate(documents, start=1):
         document_path = run_dir / f"document-{index}-{Path(name).name}"
@@ -237,7 +240,7 @@ def run_web_audit(
             presidio_full_ner=fields.get("presidio_full_ner") == "on",
         )
         report = pipeline.run(
-            flow_file_path=capture_path,
+            flow_file_path=capture_paths,
             documents=document_paths,
             seed_data=seed_data,
             excluded_domains=excluded_domains,
@@ -261,16 +264,27 @@ def run_web_audit(
 
 def run_web_endpoint_inventory(uploads: dict[str, list[tuple[str, bytes]]]) -> tuple[str, Path]:
     """Run the deterministic endpoint review used by the CLI endpoints command."""
-    capture = uploads.get("capture", [])
-    if not capture:
-        raise ValueError("Choose a capture file first.")
+    captures = uploads.get("capture", [])
+    if not captures:
+        raise ValueError("Choose at least one capture file first.")
     run_dir = Path(tempfile.mkdtemp(prefix="data-flow-analyser-endpoints-web-"))
-    capture_path = run_dir / Path(capture[0][0]).name
-    capture_path.write_bytes(capture[0][1])
-    parsed_flows = parse_flow_file(capture_path)
+    capture_paths = []
+    for index, (name, content) in enumerate(captures, start=1):
+        capture_path = run_dir / f"capture-{index}-{Path(name).name}"
+        capture_path.write_bytes(content)
+        capture_paths.append(capture_path)
+    parsed_flows = [
+        flow
+        for capture_path in capture_paths
+        for flow in parse_flow_file(capture_path)
+    ]
     inventory = inventory_flows(parsed_flows)
     payload = {
-        "capture": capture_path.name,
+        "capture": (
+            capture_paths[0].name
+            if len(capture_paths) == 1
+            else [capture_path.name for capture_path in capture_paths]
+        ),
         "flow_count": len(parsed_flows),
         "endpoint_count": len(inventory),
         "endpoints": inventory,
@@ -334,13 +348,13 @@ def _form_page(error: str | None = None) -> str:
     return _page(f"""
 <h1>Data Flow Analyser</h1><p class="hint">Easy web utility for running technical privacy audits.</p>{message}
 <section><h2>Review endpoints first</h2><p class="hint">This deterministic step lists every destination host used to help determine domains to be excluded before the audit pipeline.</p>
-<form method="post" action="/endpoints" enctype="multipart/form-data"><label>Capture file <input type="file" name="capture" required></label><p class="hint">Choose a mitmproxy flow file or HAR capture.</p><button type="submit">Gather endpoint evidence</button></form></section>
+<form method="post" action="/endpoints" enctype="multipart/form-data"><label>Capture files <input type="file" name="capture" multiple required></label><p class="hint">Choose one or more mitmproxy flow files or HAR captures. They are appended in selection order.</p><button type="submit">Gather endpoint evidence</button></form></section>
 <hr>
 <h2>Run audit pipeline</h2>
 <form id="audit_form" method="post" action="/run" enctype="multipart/form-data">
 <fieldset><legend>Input files</legend>
-<label>Capture file <input type="file" name="capture" required></label>
-<p class="hint">Choose a mitmproxy flow file or HAR capture. The network traffic is the technical evidence analysed by the pipeline.</p>
+<label>Capture files <input type="file" name="capture" multiple required></label>
+<p class="hint">Choose one or more mitmproxy flow files or HAR captures. They are appended in selection order and analysed as one capture.</p>
 <label>Disclosure documents <input type="file" name="documents" multiple required></label>
 <p class="hint">Select privacy policies, cookie policies, DPAs, or similar documents. They are used to map observed endpoints, storage, and data flows to the vendor's disclosures.</p>
 </fieldset>

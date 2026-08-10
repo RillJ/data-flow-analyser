@@ -103,7 +103,7 @@ class AuditPipeline:
 
     def run(
         self,
-        flow_file_path: Optional[Union[str, Path]] = None,
+        flow_file_path: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         documents: Optional[Union[str, Path, Sequence[Union[str, Path]]]] = None,
         seed_data: Optional[Union[SeedData, Dict[str, str]]] = None,
         excluded_domains: Optional[Sequence[str]] = None,
@@ -116,7 +116,7 @@ class AuditPipeline:
         Executes the full end-to-end privacy audit pipeline.
 
         Args:
-            flow_file_path: Path to a mitmproxy flow dump or HAR capture file.
+            flow_file_path: Path or ordered sequence of paths to mitmproxy flow dumps or HAR capture files.
             documents: Single file path, text string, or sequence/list of file paths/texts.
             seed_data: User personal data key-value pairs or pre-computed SeedData.
             excluded_domains: Domains whose flows are removed before any analysis.
@@ -141,10 +141,21 @@ class AuditPipeline:
             if progress_callback:
                 progress_callback(stage)
 
-        path_str = str(target_flow_path)
+        flow_paths = (
+            [target_flow_path]
+            if isinstance(target_flow_path, (str, Path))
+            else list(target_flow_path)
+        )
+        if not flow_paths:
+            raise ValueError("Must provide at least one flow capture file path.")
+        path_str = ", ".join(str(path) for path in flow_paths)
         report_progress(PIPELINE_STAGES[0])
-        logger.info(f"Loading and parsing network capture file: {path_str}")
-        flows: List[NetworkFlow] = parse_flow_file(path_str)
+        logger.info(f"Loading and parsing network capture file(s): {path_str}")
+        flows: List[NetworkFlow] = [
+            flow
+            for flow_path in flow_paths
+            for flow in parse_flow_file(flow_path)
+        ]
         exclusions = {normalise_domain(domain.removeprefix("*.")) for domain in (excluded_domains or [])}
         if exclusions:
             original_flow_count = len(flows)
@@ -307,16 +318,23 @@ class AuditPipeline:
     @classmethod
     def _input_hashes(
         cls,
-        flow_file_path: Union[str, Path],
+        flow_file_path: Union[str, Path, Sequence[Union[str, Path]]],
         documents: Union[str, Path, Sequence[Union[str, Path]]],
         seed_data: Optional[Union[SeedData, Dict[str, str]]],
         excluded_domains: Optional[Sequence[str]] = None,
     ) -> Dict[str, str]:
         """Create non-sensitive hashes for the inputs used by an analysis."""
         hashes: Dict[str, str] = {}
-        capture_path = Path(flow_file_path)
-        if capture_path.is_file():
-            hashes["capture"] = cls._sha256_bytes(capture_path.read_bytes())
+        flow_paths = (
+            [flow_file_path]
+            if isinstance(flow_file_path, (str, Path))
+            else list(flow_file_path)
+        )
+        for index, flow_path in enumerate(flow_paths, start=1):
+            capture_path = Path(flow_path)
+            if capture_path.is_file():
+                key = "capture" if len(flow_paths) == 1 else f"capture:{index}:{capture_path.name}"
+                hashes[key] = cls._sha256_bytes(capture_path.read_bytes())
 
         doc_list = [documents] if isinstance(documents, (str, Path)) else list(documents)
         for index, document in enumerate(doc_list, start=1):

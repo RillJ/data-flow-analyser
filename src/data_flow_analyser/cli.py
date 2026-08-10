@@ -115,11 +115,11 @@ def web(
 
 @app.command("endpoints")
 def endpoints(
-    flows: Path = typer.Option(
+    flows: List[Path] = typer.Option(
         ...,
         "--capture",
         "-c",
-        help="Path to input mitmproxy flow or HAR capture file.",
+        help="Path to input mitmproxy flow or HAR capture file. Repeat for multiple captures; flows are appended in order.",
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -137,10 +137,12 @@ def endpoints(
     ),
 ) -> None:
     """List every destination host in a capture for exclusion review."""
-    parsed_flows = parse_flow_file(flows)
+    parsed_flows = [flow for flow_path in flows for flow in parse_flow_file(flow_path)]
     inventory = inventory_flows(parsed_flows)
     payload = {
-        "capture": str(flows),
+        "capture": (
+            str(flows[0]) if len(flows) == 1 else [str(flow_path) for flow_path in flows]
+        ),
         "flow_count": len(parsed_flows),
         "endpoint_count": len(inventory),
         "endpoints": inventory,
@@ -160,7 +162,7 @@ def endpoints(
     )
     console.print(f"[bold green]✓[/bold green] Endpoint inventory written to: {markdown_output_path}")
 
-    table = Table(title=f"Endpoints in {flows}")
+    table = Table(title=f"Endpoints in {', '.join(str(flow_path) for flow_path in flows)}")
     table.add_column("Domain")
     table.add_column("Flows", justify="right")
     table.add_column("Methods")
@@ -174,11 +176,11 @@ def endpoints(
 
 @app.command()
 def audit(
-    flows: Path = typer.Option(
+    flows: List[Path] = typer.Option(
         ...,
         "--capture",
         "-c",
-        help="Path to input mitmproxy flow or HAR capture file.",
+        help="Path to input mitmproxy flow or HAR capture file. Repeat for multiple captures; flows are appended in order.",
         exists=True,
         file_okay=True,
         dir_okay=False,

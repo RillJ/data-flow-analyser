@@ -138,3 +138,26 @@ def test_endpoints_allows_explicit_json_and_markdown_paths(tmp_path, monkeypatch
     assert explicit_markdown.is_file()
     assert not list(tmp_path.glob("endpoints-*.json"))
     assert not list(tmp_path.glob("endpoints-*.md"))
+
+
+def test_endpoints_appends_multiple_capture_inputs_in_order(tmp_path, monkeypatch):
+    first = tmp_path / "first.flow"
+    second = tmp_path / "second.flow"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch(
+            "data_flow_analyser.cli.parse_flow_file",
+            side_effect=[["first-flow"], ["second-flow"]],
+        ) as parse,
+        patch("data_flow_analyser.cli.inventory_flows", return_value=[]),
+    ):
+        result = runner.invoke(
+            app,
+            ["endpoints", "--capture", str(first), "--capture", str(second)],
+        )
+
+    assert result.exit_code == 0, result.stdout
+    assert [call.args[0] for call in parse.call_args_list] == [first, second]

@@ -32,6 +32,7 @@ def test_form_page_contains_local_upload_and_consent_controls():
 
     assert 'enctype="multipart/form-data"' in page
     assert 'name="capture"' in page
+    assert 'name="capture" multiple' in page
     assert 'id="audit_form"' in page
     assert "<legend>Input files</legend>" in page
     assert "<legend>Consent metadata</legend>" in page
@@ -160,3 +161,26 @@ def test_endpoint_inventory_reuses_deterministic_endpoint_logic(tmp_path):
     assert run_id
     assert json.loads((run_dir / "endpoints.json").read_text(encoding="utf-8"))["endpoints"] == inventory
     assert "# Endpoint Inventory" in (run_dir / "endpoints.md").read_text(encoding="utf-8")
+
+
+def test_web_audit_passes_multiple_captures_in_upload_order():
+    report = MagicMock()
+    with (
+        patch("data_flow_analyser.web.AuditPipeline") as pipeline_class,
+        patch("data_flow_analyser.web.ReportExporter.to_markdown_file"),
+        patch("data_flow_analyser.web.ReportExporter.to_json_file"),
+    ):
+        pipeline_class.return_value.run.return_value = report
+        run_web_audit(
+            {},
+            {
+                "capture": [("before.flow", b"before"), ("after.flow", b"after")],
+                "documents": [("policy.txt", b"policy")],
+            },
+        )
+
+    capture_paths = pipeline_class.return_value.run.call_args.kwargs["flow_file_path"]
+    assert [path.name for path in capture_paths] == [
+        "capture-1-before.flow",
+        "capture-2-after.flow",
+    ]
