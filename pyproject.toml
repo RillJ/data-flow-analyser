@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "data-flow-analyser"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI-Powered Network Traffic Analysis for Privacy Risk Detection."
 readme = "README.md"
 requires-python = ">=3.10"

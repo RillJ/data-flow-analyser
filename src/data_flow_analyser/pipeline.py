@@ -82,6 +82,8 @@ class AuditPipeline:
         temperature: float = 0.0,
         presidio_language: str = "en",
         presidio_full_ner: bool = False,
+        presidio_responses_only: bool = False,
+        presidio_skip_known_file_types: bool = False,
     ):
         self.doc_ingestor = PolicyDocumentIngestor(
             model=llm_model, api_key=api_key, api_base=api_base,
@@ -96,6 +98,8 @@ class AuditPipeline:
         self.presidio_detector = PresidioPersonalDataDetector(
             language=presidio_language,
             full_ner=presidio_full_ner,
+            responses_only=presidio_responses_only,
+            skip_known_file_types=presidio_skip_known_file_types,
         )
         self.llm_model = llm_model
         self.api_base = api_base

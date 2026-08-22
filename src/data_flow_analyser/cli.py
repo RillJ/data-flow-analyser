@@ -257,6 +257,16 @@ def audit(
         "--presidio-full-ner",
         help="Run spaCy NER on large values too; slower, but may improve accuracy.",
     ),
+    presidio_responses_only: bool = typer.Option(
+        False,
+        "--presidio-responses-only",
+        help="Run Presidio only on response headers, bodies, and cookies; skip request data.",
+    ),
+    presidio_skip_known_file_types: bool = typer.Option(
+        False,
+        "--presidio-skip-known-file-types",
+        help="Skip Presidio payloads identified as common binary/media file types.",
+    ),
     consent_decided_at: Optional[str] = typer.Option(
         None,
         "--consent-decided-at",
@@ -334,6 +344,8 @@ def audit(
             api_base=api_base,
             presidio_language=presidio_language,
             presidio_full_ner=presidio_full_ner,
+            presidio_responses_only=presidio_responses_only,
+            presidio_skip_known_file_types=presidio_skip_known_file_types,
         )
 
         seed_data = None

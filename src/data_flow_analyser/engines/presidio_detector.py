@@ -61,6 +61,24 @@ NER_ENTITY_TYPES = {
     "ORGANIZATION",
 }
 
+# Presidio is intended for textual values. These common binary/media formats
+# are usually large and cannot contain useful text for this detector.
+KNOWN_BINARY_EXTENSIONS = {
+    ".7z", ".avif", ".bin", ".bmp", ".bz2", ".class", ".dll", ".doc",
+    ".css", ".docx", ".eot", ".gif", ".gz", ".ico", ".jpeg", ".jpg",
+    ".js", ".map", ".mjs", ".mp3", ".mp4", ".pdf", ".png", ".so", ".svg",
+    ".tar", ".tgz", ".ttf", ".wasm", ".wav", ".webp", ".woff", ".woff2",
+    ".xls", ".xlsx", ".zip",
+}
+KNOWN_BINARY_CONTENT_TYPES = {
+    "application/7z", "application/gzip", "application/java-archive",
+    "application/octet-stream", "application/pdf", "application/zip",
+    "application/x-7z-compressed", "application/x-bzip2", "application/x-gzip",
+    "application/x-rar-compressed", "application/x-tar", "application/wasm",
+    "application/javascript", "application/vnd.ms-fontobject", "audio/",
+    "font/", "image/", "text/css", "text/javascript", "video/",
+}
+
 
 class PresidioPersonalDataDetector:
     """Run Presidio over decoded scalar values while preserving flow context."""
@@ -75,6 +93,8 @@ class PresidioPersonalDataDetector:
         max_text_length: int = 50000,
         chunk_overlap: int = 512,
         max_ner_text_length: int = 10000,
+        responses_only: bool = False,
+        skip_known_file_types: bool = False,
     ):
         self.score_threshold = score_threshold
         self.language = language
@@ -84,6 +104,8 @@ class PresidioPersonalDataDetector:
         self.max_text_length = max(1, max_text_length)
         self.chunk_overlap = max(0, min(chunk_overlap, self.max_text_length - 1))
         self.max_ner_text_length = max(1, max_ner_text_length)
+        self.responses_only = responses_only
+        self.skip_known_file_types = skip_known_file_types
         # AnalyzerEngine is an optional runtime dependency. ``Any`` keeps
         # static type checkers from treating this deliberately lazy field as
         # permanently None while still allowing the dependency-free fallback.
@@ -191,9 +213,12 @@ class PresidioPersonalDataDetector:
         flow_list = list(flows)
         logger.debug(
             "Presidio detection started: flows=%d max_values_per_flow=%d "
-            "max_unique_values=%d max_ner_text_length=%d full_ner=%s",
+            "max_unique_values=%d max_ner_text_length=%d full_ner=%s "
+            "responses_only=%s skip_known_file_types=%s",
             len(flow_list), self.max_values_per_flow, self.max_unique_values,
             self.max_ner_text_length, self.full_ner,
+            getattr(self, "responses_only", False),
+            getattr(self, "skip_known_file_types", False),
         )
         detections: List[Dict[str, Any]] = []
         for flow_index, flow in enumerate(flow_list, start=1):
@@ -324,10 +349,9 @@ class PresidioPersonalDataDetector:
             if end == len(value):
                 break
 
-    @staticmethod
-    def _flow_payloads(flow: NetworkFlow) -> Iterable[Tuple[str, str, Any]]:
+    def _flow_payloads(self, flow: NetworkFlow) -> Iterable[Tuple[str, str, Any]]:
         query = dict(parse_qsl(urlsplit(flow.url).query, keep_blank_values=True))
-        if query:
+        if query and not getattr(self, "responses_only", False) and not self._skip_file_type(flow, "request"):
             yield "request", "request.url_query", query
         for direction, location, values in (
             ("request", "request.headers", flow.request_headers),
@@ -337,8 +361,47 @@ class PresidioPersonalDataDetector:
             ("response", "response.body", flow.response_body),
             ("response", "response.cookies", flow.cookies_set),
         ):
+            # Sent cookies remain useful, compact identifiers even in the
+            # response-focused mode. The option is about large/request
+            # payloads, not about discarding cookie evidence.
+            if (
+                getattr(self, "responses_only", False)
+                and direction == "request"
+                and location != "request.cookies"
+            ):
+                continue
+            is_cookie = location.endswith(".cookies")
+            skip_file_type = (
+                not is_cookie
+                and location.endswith(".body")
+                and self._skip_file_type(flow, direction)
+            )
+            if skip_file_type:
+                logger.debug(
+                    "Presidio payload skipped: flow_id=%s direction=%s location=%s reason=known_file_type",
+                    flow.flow_id, direction, location,
+                )
+                continue
             if values:
                 yield direction, location, values
+
+    def _skip_file_type(self, flow: NetworkFlow, direction: str) -> bool:
+        """Return whether a request/response payload is a known binary type."""
+        if not getattr(self, "skip_known_file_types", False):
+            return False
+        headers = flow.request_headers if direction == "request" else flow.response_headers
+        content_type = next(
+            (value.split(";", 1)[0].strip().lower()
+             for key, value in headers.items() if key.lower() == "content-type"),
+            "",
+        )
+        if any(content_type == known or content_type.startswith(known)
+               for known in KNOWN_BINARY_CONTENT_TYPES):
+            return True
+        path = urlsplit(flow.url).path if direction == "request" else (flow.path or urlsplit(flow.url).path)
+        suffix = path.lower().rsplit("/", 1)[-1]
+        extension = "." + suffix.rsplit(".", 1)[-1] if "." in suffix else ""
+        return extension in KNOWN_BINARY_EXTENSIONS
 
     @staticmethod
     def _scalar_values(payload: Any, parent: str) -> Iterable[Tuple[str, str]]:

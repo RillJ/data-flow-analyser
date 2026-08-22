@@ -238,6 +238,8 @@ def run_web_audit(
             api_base=fields.get("api_base") or None,
             presidio_language=fields["presidio_language"] if "presidio_language" in fields else "en",
             presidio_full_ner=fields.get("presidio_full_ner") == "on",
+            presidio_responses_only=fields.get("presidio_responses_only") == "on",
+            presidio_skip_known_file_types=fields.get("presidio_skip_known_file_types") == "on",
         )
         report = pipeline.run(
             flow_file_path=capture_paths,
@@ -372,7 +374,7 @@ def _form_page(error: str | None = None) -> str:
 <div class="grid"><div><label>API key <input name="api_key" type="password" autocomplete="off" placeholder="Optional: uses .env if blank"></label></div>
 <div><label>API base <input name="api_base" type="url" placeholder="Optional: custom LiteLLM base URL"></label></div></div>
 </fieldset>
-<fieldset><legend>Evidence filters and personal data detection</legend>
+<fieldset><legend>Evidence filters</legend>
 <label>Seed input JSON <select id="seed_json_mode" name="seed_json_mode"><option value="text" selected>Paste text</option><option value="file">Upload file</option></select></label>
 <div id="seed_json_text_container"><label>Seed JSON text <textarea name="seed_json" rows="4" placeholder='{{"email": "research-user@example.org", "account_id": "test-account-123"}}'></textarea></label></div>
 <div id="seed_json_file_container" hidden><label>Seed JSON file <input type="file" name="seed_file" accept=".json,application/json"></label></div>
@@ -381,10 +383,16 @@ def _form_page(error: str | None = None) -> str:
 <div id="exclude_json_text_container"><label>Excluded domains JSON text <textarea name="exclude_json" rows="3" placeholder='{{"domains": ["mozilla.org", "example.com"]}}'></textarea></label></div>
 <div id="exclude_json_file_container" hidden><label>Excluded domains JSON file <input type="file" name="exclude_file" accept=".json,application/json"></label></div>
 <p class="hint">Optional domains to remove before analysis, including their subdomains.</p>
+</fieldset>
+<fieldset><legend>Presidio personal data detection</legend>
 <label>Presidio language <select name="presidio_language"><option value="">Disabled</option><option value="en" selected>English</option><option value="nl">Dutch</option><option value="de">German</option><option value="es">Spanish</option><option value="it">Italian</option><option value="fr">French</option></select></label>
 <p class="hint">Presidio looks for likely personal data entities such as names, email addresses, locations, dates, IP addresses, and similar patterns in captured values. They are provided as additional evidence to the seed input.</p>
 <label><input name="presidio_full_ner" type="checkbox"> Run full Presidio NER on large values (slower)</label>
 <p class="hint">To save processing time, by default NER only runs on smaller data flows and regex on larger ones.</p>
+<label><input name="presidio_responses_only" type="checkbox"> Scan responses only</label>
+<p class="hint">Skip request headers, query parameters, and bodies during Presidio detection. Sent cookies remain included.</p>
+<label><input name="presidio_skip_known_file_types" type="checkbox"> Skip known binary and media file types</label>
+<p class="hint">Skip payloads identified by common extensions or Content-Type values such as ZIP, JPG, PNG, PDF, audio, and video.</p>
 </fieldset>
 <fieldset><legend>Diagnostics</legend>
 <label><input name="verbose" type="checkbox"> Verbose diagnostics</label>

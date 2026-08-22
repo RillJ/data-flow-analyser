@@ -326,16 +326,20 @@ data-flow-analyser audit \
   --log-file audit-debug.log
 ```
 
-#### Use full Presidio NER
+#### Tune Presidio processing scope
 
-By default, Presidio uses fast deterministic recognisers for very large values to avoid running spaCy NER over entire response bodies. To use the full NER on those values as well, use `--presidio-full-ner`.
+The depth of processing by Presidio can be configured. More depth equals higher chances of finding personal data candidates in flow traces.
+
+`--presidio-responses-only` skips request headers, query parameters, and bodies while retaining sent cookies as compact, useful identifiers.
+`--presidio-skip-known-file-types` skips payloads identified as common binary or media formats using their URL extension or `Content-Type` (for example ZIP, JPG, PNG, PDF, audio, and video).
+`--presidio-full-ner` applies spaCy NER to all flow traces. By default, Presidio uses fast deterministic recognisers for big traces.
 
 ```bash
 data-flow-analyser audit \
   --capture scenarios.flows \
   --doc dpa.txt \
-  --presidio-full-ner \
-  --verbose
+  --presidio-responses-only \
+  --presidio-skip-known-file-types
 ```
 
 #### Understand the reports

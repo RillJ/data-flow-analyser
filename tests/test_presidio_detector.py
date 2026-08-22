@@ -33,6 +33,8 @@ def _detector_with_fake_analyzer() -> PresidioPersonalDataDetector:
     detector.max_text_length = 50000
     detector.chunk_overlap = 512
     detector.max_ner_text_length = 10000
+    detector.responses_only = False
+    detector.skip_known_file_types = False
     detector._non_ner_entities = ["EMAIL_ADDRESS"]
     detector.analyser = FakeAnalyzer()
     detector.deterministic_analyser = detector.analyser
@@ -127,3 +129,54 @@ def test_presidio_full_ner_chunks_large_values():
 
     assert len(detector.analyser.calls) > 1
     assert all(len(chunk) <= 8 for chunk in detector.analyser.calls)
+
+
+def test_presidio_responses_only_skips_request_payloads():
+    detector = _detector_with_fake_analyzer()
+    flow = NetworkFlow(
+        flow_id="flow-1", timestamp=datetime.now(timezone.utc), method="POST",
+        url="https://example.nl/collect?name=Julian%20Rill", host="example.nl", path="/collect",
+        request_body='{"name": "Julian Rill"}',
+        response_body='{"name": "Julian Rill"}',
+    )
+
+    findings = detector.detect_flows([flow])
+
+    assert {finding["direction"] for finding in findings} == {"request", "response"}
+    assert {finding["location"] for finding in findings} == {
+        "request.url_query.name",
+        "request.body.name",
+        "response.body.name",
+    }
+    flow.cookies_sent = {"session": "Julian Rill"}
+    detector.responses_only = True
+    detector._analysis_cache.clear()
+    findings = detector.detect_flows([flow])
+    assert {finding["direction"] for finding in findings} == {"request", "response"}
+    assert any(finding["location"] == "request.cookies.session" for finding in findings)
+
+
+def test_presidio_can_skip_known_binary_payloads():
+    detector = _detector_with_fake_analyzer()
+    detector.skip_known_file_types = True
+    flow = NetworkFlow(
+        flow_id="flow-1", timestamp=datetime.now(timezone.utc), method="GET",
+        url="https://example.nl/image.jpg", host="example.nl", path="/image.jpg",
+        response_headers={"Content-Type": "image/jpeg"},
+        response_body='{"name": "Julian Rill"}',
+    )
+
+    assert detector.detect_flows([flow]) == []
+
+
+def test_presidio_skips_static_javascript_by_content_type():
+    detector = _detector_with_fake_analyzer()
+    detector.skip_known_file_types = True
+    flow = NetworkFlow(
+        flow_id="flow-1", timestamp=datetime.now(timezone.utc), method="GET",
+        url="https://example.nl/rsrc.php?id=123", host="example.nl", path="/rsrc.php",
+        response_headers={"Content-Type": "application/javascript; charset=utf-8"},
+        response_body='{"name": "Julian Rill"}',
+    )
+
+    assert detector.detect_flows([flow]) == []

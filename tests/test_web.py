@@ -37,7 +37,8 @@ def test_form_page_contains_local_upload_and_consent_controls():
     assert "<legend>Input files</legend>" in page
     assert "<legend>Consent metadata</legend>" in page
     assert "<legend>LLM and analysis settings</legend>" in page
-    assert "<legend>Evidence filters and personal data detection</legend>" in page
+    assert "<legend>Evidence filters</legend>" in page
+    assert "<legend>Presidio personal data detection</legend>" in page
     assert "<legend>Diagnostics</legend>" in page
     assert 'name="documents" multiple' in page
     assert 'name="consent_outcome"' in page
@@ -56,6 +57,8 @@ def test_form_page_contains_local_upload_and_consent_controls():
     assert 'name="presidio_language"' in page
     assert 'value="">Disabled</option>' in page
     assert 'name="presidio_full_ner"' in page
+    assert 'name="presidio_responses_only"' in page
+    assert 'name="presidio_skip_known_file_types"' in page
     assert 'name="verbose"' in page
     assert 'action="/endpoints"' in page
     assert "Gather endpoint evidence" in page
@@ -113,6 +116,8 @@ def test_run_web_audit_reuses_pipeline_and_writes_three_artifacts(tmp_path):
                 "api_base": "https://llm.example.test/v1",
                 "presidio_language": "nl",
                 "presidio_full_ner": "on",
+                "presidio_responses_only": "on",
+                "presidio_skip_known_file_types": "on",
                 "verbose": "on",
                 "seed_json": '{"email": "test@example.org"}',
                 "exclude_json": '{"domains": ["example.com"]}',
@@ -140,6 +145,8 @@ def test_run_web_audit_reuses_pipeline_and_writes_three_artifacts(tmp_path):
         api_base="https://llm.example.test/v1",
         presidio_language="nl",
         presidio_full_ner=True,
+        presidio_responses_only=True,
+        presidio_skip_known_file_types=True,
     )
 
 
